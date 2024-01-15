@@ -3,18 +3,18 @@
 // Specialised user input functions
 
 import json5 from 'json5'
-import { RE_DATE, RE_DATE_INTERVAL } from './dateTime'
+import { getDateStringFromCalendarFilename, RE_DATE, RE_DATE_INTERVAL } from './dateTime'
+import { getRelativeDates } from './NPdateTime'
 import { clo, logDebug, logError, logWarn, JSP } from './dev'
 import { findStartOfActivePartOfNote, findEndOfActivePartOfNote } from './paragraph'
 
 // NB: This fn is a local copy from helpers/general.js, to avoid a circular dependency
-async function parseJSON5(contents: string): Promise<?{ [string]: ?mixed }> {
+function parseJSON5(contents: string): ?{ [string]: ?mixed } {
   try {
     const value = json5.parse(contents)
     return (value: any)
   } catch (error) {
     logError('userInput / parseJSON5', error.message)
-    await showMessage('Invalid JSON5 in your configuration. Please fix it to use configuration')
     return {}
   }
 }
@@ -56,6 +56,7 @@ export async function chooseOptionWithModifiers<T, TDefault = T>(
   message: string,
   options: $ReadOnlyArray<Option<T>>,
 ): Promise<{ ...TDefault, index: number, keyModifiers: Array<string> }> {
+  logDebug('userInput / chooseOptionWithModifiers()', `About to showOptions with ${options.length} options & prompt:"${message}"`)
   // $FlowFixMe[prop-missing]
   const { index, keyModifiers } = await CommandBar.showOptions(
     options.map((option) => option.label),
@@ -246,46 +247,60 @@ export async function chooseFolder(msg: string, includeArchive?: boolean = false
 }
 
 /**
- * Ask user to select a heading from those in a given note (regular or calendar), or optionally create a new heading at top or bottom of note to use.
- * TODO: Better handle case where note has no headings
+ * Ask user to select a heading from those in a given note (regular or calendar), or optionally create a new heading at top or bottom of note to use, or the top or bottom of the note.
  * @author @jgclark
  *
  * @param {TNote} note - note to draw headings from
- * @param {boolean} optionAddAtBottom - whether to add '(bottom of note)' option. Default: true.
+ * @param {boolean} optionAddATopAndtBottom - whether to add 'top of note' and 'bottom of note' options. Default: true.
  * @param {boolean} optionCreateNewHeading - whether to offer to create a new heading at the top or bottom of the note. Default: false.
  * @param {boolean} includeArchive - whether to include headings in the Archive section of the note (i.e. after 'Done'). Default: false.
- * @returns {string} - the selected heading as text without any markdown heading markers. Blank string implies no heading selected, and user wishes to write to the end of the note.
+ * @param {number} headingLevel - if adding a heading, the H1-H5 level to set (as an integer)
+ * @returns {string} - the selected heading as text without any markdown heading markers. Blank string implies no heading selected, and user wishes to write to the end of the note. Special string '<<top>>' implies to write to the top (after any preamble or frontmatter).
  */
-export async function chooseHeading(note: TNote, optionAddAtBottom: boolean = true, optionCreateNewHeading: boolean = false, includeArchive: boolean = false): Promise<string> {
+export async function chooseHeading(
+  note: TNote,
+  optionAddATopAndtBottom: boolean = true, optionCreateNewHeading: boolean = false,
+  includeArchive: boolean = false,
+  headingLevel: number = 2
+): Promise<string> {
   try {
     let headingStrings = []
-    const headingLevel = 2
-    const spacer = '    '
-    // Decide whether to include all headings in note, or just those
-    // before the Done/Cancelled section
+    // const headingLevel = 2
+    // const spacer = '    '
+    const spacer = '#'
+    // Decide whether to include all headings in note, or just those before the Done/Cancelled section.
+    let headingParas: Array<TParagraph> = []
     const indexEndOfActive = findEndOfActivePartOfNote(note)
-    const headingParas = includeArchive
-      ? note.paragraphs.filter((p) => p.type === 'title') // = all headings, not just the top 'Title'
-      : note.paragraphs.filter((p) => p.type === 'title' && p.lineIndex < indexEndOfActive) // = all headings in the active part of the note
+    if (includeArchive) {
+      headingParas = note.paragraphs.filter((p) => p.type === 'title' && p.lineIndex < indexEndOfActive) // = all headings in the active part of the note
+    } else {
+      headingParas = note.paragraphs.filter((p) => p.type === 'title') // = all headings, not just the top 'Title'
+    }
+    if (headingParas.length > 0) {
+      // Now remove first heading if its H1 and matches the title, as that's not a heading in this meaning
+      if (headingParas[0].content === note.title) {
+        headingParas = headingParas.slice(1)
+        // logDebug('', `- removed title ${note.title} -> now has ${headingParas.length} headingParas`)
+      }
+    }
     if (headingParas.length > 0) {
       headingStrings = headingParas.map((p) => {
         let prefix = ''
-        for (let i = 1; i < p.headingLevel; i++) {
+        for (let i = 0; i < p.headingLevel; i++) {
           prefix += spacer
         }
         // return `${prefix}➡️ ${p.content}` // an experiment that didn't look great
-        return `${prefix}${p.content}`
+        return `${prefix} ${p.content}`
       })
     }
     if (optionCreateNewHeading) {
       // Add options to add new heading at top or bottom of note
       if (note.type === 'Calendar') {
-        headingStrings.unshift('➕#️⃣ (first insert new heading at the start of the note)') // insert at start
+        headingStrings.unshift('➕#️⃣ (first insert new heading at the start of the note)')
       } else {
-        headingStrings.splice(1, 0, `➕#️⃣ (first insert new heading under the title)`) // insert as second item, after title
+        headingStrings.unshift(`➕#️⃣ (first insert new heading under the title)`)
       }
 
-      // headingStrings.unshift('➕#️⃣ (first insert new heading at the start of the note)') // insert at second item
       headingStrings.push(`➕#️⃣ (first insert new heading at the end of the note)`)
     }
 
@@ -294,9 +309,10 @@ export async function chooseHeading(note: TNote, optionAddAtBottom: boolean = tr
     //   headingStrings.unshift('⬆️ (top of note)') // add at start (as it has no title heading)
     // }
 
-    if (optionAddAtBottom) {
+    if (optionAddATopAndtBottom) {
       // Ensure we can always add at bottom of note
-      headingStrings.push('⏬ (bottom of note)') // add at end
+      headingStrings.unshift('⏫ (top of note)') // insert as top item
+      headingStrings.push('⏬ (bottom of note)') // add as last item
     }
 
     // If there are no heading options to present, then just return '' = end of note
@@ -306,7 +322,8 @@ export async function chooseHeading(note: TNote, optionAddAtBottom: boolean = tr
 
     // Present heading options to user and ask for choice
     const result = await CommandBar.showOptions(headingStrings, `Select a heading from note '${note.title ?? 'Untitled'}'`)
-    let headingToReturn = headingStrings[result.index].trimLeft() // don't trim right as there can be valid traillng spaces
+    // Get the underlying heading back by removing added # marks and trimming left. We don't trim right as there can be valid traillng spaces.
+    let headingToReturn = headingStrings[result.index].replace(/^#{1,5}\s*/, '')
     let newHeading
 
     switch (headingToReturn) {
@@ -349,6 +366,11 @@ export async function chooseHeading(note: TNote, optionAddAtBottom: boolean = tr
         }
         break
 
+      case '⏫ (top of note)':
+        logDebug('userInput / chooseHeading', `selected top of note, rather than a heading`)
+        headingToReturn = '<<top of note>>' // hopefully won't ever be used as an actual title!
+        break
+
       case '⏬ (bottom of note)':
         logDebug('userInput / chooseHeading', `selected end of note, rather than a heading`)
         headingToReturn = ''
@@ -378,8 +400,7 @@ export async function chooseHeading(note: TNote, optionAddAtBottom: boolean = tr
 export async function askDateInterval(dateParams: string): Promise<string> {
   // logDebug('askDateInterval', `starting with '${dateParams}':`)
   const dateParamsTrimmed = dateParams?.trim() || ''
-  const paramConfig =
-    dateParamsTrimmed.startsWith('{') && dateParamsTrimmed.endsWith('}') ? await parseJSON5(dateParams) : dateParamsTrimmed !== '' ? await parseJSON5(`{${dateParams}}`) : {}
+  const paramConfig = dateParamsTrimmed.startsWith('{') && dateParamsTrimmed.endsWith('}') ? parseJSON5(dateParams) : dateParamsTrimmed !== '' ? parseJSON5(`{${dateParams}}`) : {}
   // logDebug('askDateInterval', `param config: ${dateParams} as ${JSON.stringify(paramConfig) ?? ''}`)
   // ... = "gather the remaining parameters into an array"
   const allSettings: { [string]: mixed } = { ...paramConfig }
@@ -432,7 +453,7 @@ export async function datePicker(dateParams: string, config?: { [string]: ?mixed
     clo(dateConfig, 'userInput / datePicker dateConfig object:')
     const dateParamsTrimmed = dateParams.trim()
     const paramConfig =
-      dateParamsTrimmed.startsWith('{') && dateParamsTrimmed.endsWith('}') ? await parseJSON5(dateParams) : dateParamsTrimmed !== '' ? await parseJSON5(`{${dateParams}}`) : {}
+      dateParamsTrimmed.startsWith('{') && dateParamsTrimmed.endsWith('}') ? parseJSON5(dateParams) : dateParamsTrimmed !== '' ? parseJSON5(`{${dateParams}}`) : {}
     // $FlowIgnore[incompatible-type]
     logDebug('userInput / datePicker', `params: ${dateParams} -> ${JSON.stringify(paramConfig)}`)
     // '...' = "gather the remaining parameters into an array"
@@ -468,9 +489,8 @@ export async function datePicker(dateParams: string, config?: { [string]: ?mixed
 }
 
 /**
- * Ask for a (floating point) number from user
+ * Ask for an integer number from user
  * @author @jgclark and @m1well
- *
  * @param question question for the commandbar
  * @returns {Promise<number|*>} returns integer or NaN
  */
@@ -482,6 +502,30 @@ export async function inputInteger(question: string): Promise<number> {
     logError('userInput / inputInteger', `Error trying to get integer answer for question '${question}'`)
     return NaN
   }
+}
+
+/**
+ * Ask user for integer, with lower and upper bounds. If out of bounds return NaN.
+ * @author @jgclark
+ * @param question question for the commandbar
+ * @param {number} upperBound must be equal or less than this
+ * @param {number?} lowerBound must be equal or greater than this; defaults to 0 if not given
+ * @returns {Promise<number|*>} returns integer or NaN
+ */
+export async function inputIntegerBounded(title: string, question: string, upperBound: number, lowerBound: number = 0.0): Promise<number> {
+  let result = NaN
+  const reply = await CommandBar.textPrompt(title, question)
+  if (reply != null && reply && isInt(reply)) {
+    const value = parseFloat(reply)
+    if (value <= upperBound && value >= lowerBound) {
+      result = value
+    } else {
+      logWarn('userInput / inputInteger', `Value ${reply} is out of bounds for [${String(lowerBound)},${String(upperBound)}] -> NaN`)
+    }
+  } else {
+    logWarn('userInput / inputInteger', `No valid integer answer for question '${question}' -> NaN`)
+  }
+  return result
 }
 
 /**
@@ -498,7 +542,7 @@ export function isInt(value: string): boolean {
 }
 
 /**
- * Ask for an integer from user
+ * Ask for a (floating-point) number from user
  * @author @jgclark
  *
  * @param question question for the commandbar
@@ -557,14 +601,64 @@ export const multipleInputAnswersAsArray = async (question: string, submit: stri
   return answers
 }
 
+const relativeDates = getRelativeDates()
+
+/**
+ * Create a new note with a given title, content, and in a specified folder.
+ * If title, content, or folder is not provided, it will prompt the user for input.
+ *
+ * @param {string} [_title] - The title of the new note.
+ * @param {string} [_content] - The content of the new note.
+ * @param {string} [_folder] - The folder to create the new note in.
+ * @returns {Promise<Note | false>} - The newly created note, or false if the operation was cancelled.
+ */
+export async function createNewNote(_title?: string = '', _content?: string = '', _folder?: string = ''): Promise<Note | null> {
+  const title = _title || (await getInput('Title of new note', 'OK', 'New Note', ''))
+  const content = _content
+  if (title) {
+    const folder = _folder || (await chooseFolder('Select folder to add note in:', false, true))
+    const noteContent = `# ${title}\n${content}`
+    const filename = await DataStore.newNoteWithContent(noteContent, folder)
+    return DataStore.noteByFilename(filename, 'Notes') || null
+  } else {
+    return null
+  }
+}
+
+/**
+ * V2 of displayTitle that optionally adds the relative date string after relevant calendar note titles, to make it easier to spot last/this/next D/W/M/Q
+ * Note: that this returns ISO title for daily notes (YYYY-MM-DD) not the one from the filename. This is different from the original displayTitle.
+ * Note: Forked from helpers/general.js, but needed here anyway to avoid a circular dependency
+ * @param {CoreNoteFields} noteIn
+ * @param {boolean} showRelativeDates? (default: false)
+ * @returns {string}
+ */
+export function displayTitleWithRelDate(noteIn: CoreNoteFields, showRelativeDates: boolean = true): string {
+  if (noteIn.type === 'Calendar') {
+    let calNoteTitle = getDateStringFromCalendarFilename(noteIn.filename, true) ?? '(error)'
+    if (showRelativeDates) {
+      for (const rd of relativeDates) {
+        if (calNoteTitle === rd.dateStr) {
+          // console.log(`Found match with ${rd.relName}`)
+          calNoteTitle = `${rd.dateStr}\t(📆 ${rd.relName})`
+        }
+      }
+    }
+    return calNoteTitle
+  } else {
+    return noteIn.title ?? '(error)'
+  }
+}
+
 /**
  * Choose a particular note from a CommandBar list of notes
- * @author @dwertheimer
+ * @author @dwertheimer extended by @jgclark to include 'relative date' indicators in displayed title
  * @param {boolean} includeProjectNotes
  * @param {boolean} includeCalendarNotes
  * @param {Array<string>} foldersToIgnore - a list of folder names to ignore
  * @param {string} promptText - text to display in the CommandBar
  * @param {boolean} currentNoteFirst - add currently open note to the front of the list
+ * @param {boolean} allowNewNoteCreation - add option for user to create new note to return instead of choosing existing note
  * @returns {TNote | null} note
  */
 export async function chooseNote(
@@ -573,6 +667,7 @@ export async function chooseNote(
   foldersToIgnore?: Array<string> = [],
   promptText?: string = 'Choose a note',
   currentNoteFirst?: boolean = false,
+  allowNewNoteCreation?: boolean = false,
 ): Promise<TNote | null> {
   let noteList = []
   const projectNotes = DataStore.projectNotes
@@ -583,7 +678,7 @@ export async function chooseNote(
   if (includeCalendarNotes) {
     noteList = noteList.concat(calendarNotes)
   }
-  let noteListFiltered = noteList.filter((note) => {
+  const noteListFiltered = noteList.filter((note) => {
     // filter out notes that are in folders to ignore
     let isInIgnoredFolder = false
     foldersToIgnore.forEach((folder) => {
@@ -594,13 +689,23 @@ export async function chooseNote(
     isInIgnoredFolder = isInIgnoredFolder || !/(\.md|\.txt)$/i.test(note.filename) //do not include non-markdown files
     return !isInIgnoredFolder
   })
-  let opts = noteListFiltered.map((note) => {
-    return note.title && note.title !== '' ? note.title : note.filename
+  const sortedNoteListFiltered = noteListFiltered.sort((first, second) => second.changedDate - first.changedDate) // most recent first
+  const opts = sortedNoteListFiltered.map((note) => {
+    return displayTitleWithRelDate(note)
   })
-  if (currentNoteFirst) {
-    noteListFiltered.unshift(Editor.note)
-    opts.unshift(`[Current note: "${Editor.title || ''}"]`)
+  const { note } = Editor
+  if (allowNewNoteCreation) {
+    opts.unshift('[New note]')
+    sortedNoteListFiltered.unshift('[New note]') // just keep the indexes matching
+  }
+  if (currentNoteFirst && note) {
+    sortedNoteListFiltered.unshift(note)
+    opts.unshift(`[Current note: "${displayTitleWithRelDate(Editor)}"]`)
   }
   const { index } = await CommandBar.showOptions(opts, promptText)
-  return noteListFiltered[index] ?? null
+  let noteToReturn = sortedNoteListFiltered[index]
+  if (noteToReturn === '[New note]') {
+    noteToReturn = await createNewNote()
+  }
+  return noteToReturn ?? null
 }

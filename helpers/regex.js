@@ -2,12 +2,12 @@
 // @flow
 //---------------------------------------------------------------------
 // Regex definitions for NotePlan and its plugins
-// @jgclark, last updated 15.1.2023
+// @jgclark, last updated 28.7.2023
 //---------------------------------------------------------------------
-// 
+//
 // This file holds definitions that don't live in more specific helper files, and also lists other files with useful regexes.
 //
-// Note: these are JavaScript RegExp objects. 
+// Note: these are JavaScript RegExp objects.
 // They are then difficult to use in composition to more complex regexes: to do that start with simpler strings.
 //
 // The main ways to use them are:
@@ -18,7 +18,10 @@
 //---------------------------------------------------------------------
 
 // Times, Dates
-export const RE_SCHEDULED_DATES_G: RegExp = /[>@](today|tomorrow|yesterday|(([0-9]{4})(-((0[1-9]|1[0-2])(-(0[1-9]|1[0-9]|2[0-9]|3[0-1]))?|Q[1-4]|W0[1-9]|W[1-4]\d|W5[0-3]))?))/g // from Eduard
+export const RE_SCHEDULED_DATES_G: RegExp = />(today|tomorrow|yesterday|(([0-9]{4})(-((0[1-9]|1[0-2])(-(0[1-9]|1[0-9]|2[0-9]|3[0-1]))?|Q[1-4]|W0[1-9]|W[1-4]\d|W5[0-3]))?))/g // from Eduard, but tweaked to ignore ones that start with @ rather than >
+export const RE_FIRST_SCHEDULED_DATE_CAPTURE: RegExp = />((today|tomorrow|yesterday|(([0-9]{4})(-((0[1-9]|1[0-2])(-(0[1-9]|1[0-9]|2[0-9]|3[0-1]))?|Q[1-4]|W0[1-9]|W[1-4]\d|W5[0-3]))?)))/ // adapted from above
+export const RE_ARROW_DATES_G: RegExp = />(today|tomorrow|yesterday|(([0-9]{4})(-((0[1-9]|1[0-2])(-(0[1-9]|1[0-9]|2[0-9]|3[0-1]))?|Q[1-4]|W0[1-9]|W[1-4]\d|W5[0-3]))?))</g // as above but with a closing '<'
+
 // In helpers/dateTime.js:
 // - RE_TIME
 // - RE_DATE
@@ -96,13 +99,17 @@ export const RE_EVENT_LINK: RegExp = /!\[.*\]\(\d{4}-[01]\d-[0123]\d\s[0-2]\d:[0
 // - RE_ALLOWED_TIME_BLOCK_LINE_START
 // - RE_TIMEBLOCK_FOR_THEMES
 
+// notelinks
+export const RE_NOTELINK_G: RegExp = /\[\[[^\[]+\]\]/g
+export const RE_NOTELINK_CAPTURE_TITLE_G: RegExp = /\[\[([^\[]+)\]\]/g
+
 // URLs and Links
 export const RE_MARKDOWN_LINKS_CAPTURE_G: RegExp = /\[([^\]]+)\]\(([^\)]+)\)/g
 export const RE_MARKDOWN_LINK_PATH_CAPTURE: RegExp = /\[.+?\]\(([^\s]*?)\)/
 export const RE_MARKDOWN_LINK_PATH_CAPTURE_G: RegExp = /\[.+?\]\(([^\s]*?)\)/g
-export const RE_SIMPLE_URI_MATCH: RegExp = /(\w+:\/\/[\w\.\/\?\#\&\d\-\=%*,]+)/
-export const RE_SIMPLE_URI_MATCH_G: RegExp = /(\w+:\/\/[\w\.\/\?\#\&\d\-\=%*,]+)/g
-export const RE_SIMPLE_BARE_URI_MATCH_G: RegExp = /((?!([\("'])).|^)(\b\w+:\/{1,3}[\w\.\/\?\#\&\d\-\=\@%*,]+)/ig // complex because it's still avoiding negative look-behind (though support is apparently coming in Safari 16.4 etc.)
+export const RE_SIMPLE_URI_MATCH: RegExp = /(\w+:\/\/[\w\.\/\?\#\&\d\-\=%*~,]+)/
+export const RE_SIMPLE_URI_MATCH_G: RegExp = /(\w+:\/\/[\w\.\/\?\#\&\d\-\=%*~,]+)/g
+export const RE_SIMPLE_BARE_URI_MATCH_G: RegExp = /((?!([\("'])).|^)(\b\w+:\/{1,3}[\w\.\/\?\#\&\d\-\=\@%*~,]+)/ig // complex because it's still avoiding negative look-behind (though support is apparently coming in Safari 16.4 etc.)
 
 // Synced lines
 export const RE_SYNC_MARKER: RegExp = /\^[A-Za-z0-9]{6}(?![A-Za-z0-9])/
@@ -167,3 +174,25 @@ export const RE_ANY_TYPE_OF_OPEN_TASK_OR_CHECKLIST_MARKER: RegExp = /^\s*(\[[ \>
 export const RE_ANY_TYPE_OF_OPEN_TASK_OR_CHECKLIST_MARKER_MULTI_LINE: RegExp = /[\n^]\s*(\[[ \>]\]|[\*\-\+]\s[^\[])/g
 export const RE_ANY_TYPE_OF_CLOSED_TASK_OR_CHECKLIST_MARKER: RegExp = /^\s*[\*\-\+]\s*(\[[x\-]\]|s[^\[])/
 export const RE_ANY_TYPE_OF_CLOSED_TASK_OR_CHECKLIST_MARKER_MULTI_LINE: RegExp = /[\n^]\s*[\*\-\+]\s*(\[[x\-]\]|s[^\[])/g
+
+/**
+ * Make regex to find open tasks or checklist items string, that takes account of the user's preference for what counts as a todo.
+ * Parameter controls whether this searches all items in a multi-line string, or just the first natch in a single-line string.
+ * @param {boolean} multiLine?
+ * @returns {RegExp}
+ */
+export function formRegExForUsersOpenTasks(multiLine: boolean): RegExp {
+  // read the user's prefs for what counts as a todo
+  const CHECKLIST_TODO = "+"
+  const ASTERISK_TODO = DataStore.preference("isAsteriskTodo") ? "*" : ""
+  const DASH_TODO = DataStore.preference("isDashTodo") ? "-" : ""
+  const NUMBER_TODO = DataStore.preference("isNumbersTodo") ? "|\\d+\\." : ""
+  // form the regex to find open items for these type(s) of todos
+  let RE: RegExp
+  if (multiLine) {
+    RE = new RegExp(`[\\n^]\\s*(([${CHECKLIST_TODO}${ASTERISK_TODO}${DASH_TODO}]${NUMBER_TODO})\\s(?!\\[[x\\-\\]])(\\[[\\s>]\\])?)`, 'g')
+  } else {
+    RE = new RegExp(`^\\s*(([${CHECKLIST_TODO}${ASTERISK_TODO}${DASH_TODO}]${NUMBER_TODO})\\s(?!\\[[x\\-\\]])(\\[[\\s>]\\])?)`)
+  }
+  return RE
+}

@@ -1,9 +1,10 @@
 // @flow
 
 import moment from 'moment/min/moment-with-locales'
-import { trimString } from './dataManipulation'
+import { TASK_TYPES } from './sorting'
+import { trimString } from '@helpers/dataManipulation'
 import {
-  daysBetween,
+  getAPIDateStrFromDisplayDateStr,
   getNPWeekStr,
   getTodaysDateHyphenated,
   getTodaysDateUnhyphenated,
@@ -11,18 +12,22 @@ import {
   hyphenatedDateString,
   isScheduled,
   nowShortDateTimeISOString,
-  SCHEDULED_WEEK_NOTE_LINK,
+  replaceArrowDatesInString,
   RE_SCHEDULED_ISO_DATE,
+  SCHEDULED_WEEK_NOTE_LINK,
   SCHEDULED_QUARTERLY_NOTE_LINK,
   SCHEDULED_MONTH_NOTE_LINK,
   SCHEDULED_YEARLY_NOTE_LINK,
   WEEK_NOTE_LINK,
-} from './dateTime'
-import { isOpen } from './utils'
-import { getNPWeekData, getMonthData, getYearData, getQuarterData, toLocaleDateTimeString } from './NPdateTime'
-import { clo, JSP, logDebug, logError, logInfo, logWarn, timer } from './dev'
-import { findStartOfActivePartOfNote, isTermInMarkdownPath, isTermInURL } from './paragraph'
+} from '@helpers/dateTime'
+import { displayTitle } from '@helpers/general'
+import { getNPWeekData, getMonthData, getYearData, getQuarterData, toLocaleDateTimeString } from '@helpers/NPdateTime'
+import { clo, JSP, logDebug, logError, logInfo, logWarn, timer } from '@helpers/dev'
 import { getNoteType } from '@helpers/note'
+import { findStartOfActivePartOfNote, isTermInMarkdownPath, isTermInURL, smartPrependPara } from '@helpers/paragraph'
+import { RE_FIRST_SCHEDULED_DATE_CAPTURE } from '@helpers/regex'
+import { getLineMainContentPos } from '@helpers/search'
+import { hasScheduledDate, isOpen } from '@helpers/utils'
 
 const pluginJson = 'NPParagraph'
 
@@ -98,7 +103,7 @@ export function removeContentUnderHeading(note: CoreNoteFields, heading: string,
  * @param {string} parasAsText - text to insert (multiple lines, separated by newlines)
  * @param {number} headingLevel of the heading to insert where necessary (1-5, default 2)
  */
-export async function insertContentUnderHeading(destNote: CoreNoteFields, headingToFind: string, parasAsText: string, headingLevel: number = 2) {
+export function insertContentUnderHeading(destNote: CoreNoteFields, headingToFind: string, parasAsText: string, headingLevel: number = 2) {
   logDebug(`NPParagraph/insertContentUnderHeading`, `Called for '${headingToFind}' with ${parasAsText.split('\n').length} paras)`)
   const headingMarker = '#'.repeat(headingLevel)
   const startOfNote = findStartOfActivePartOfNote(destNote)
@@ -113,7 +118,7 @@ export async function insertContentUnderHeading(destNote: CoreNoteFields, headin
   logDebug(`NPParagraph/insertContentUnderHeading`, `insertionIndex = ${insertionIndex} (startOfNote = ${startOfNote})`)
   // If we didn't find the heading, insert at the top of the note
   const paraText = insertionIndex === startOfNote && headingToFind !== '' ? `${headingMarker} ${headingToFind}\n${parasAsText}\n` : parasAsText
-  await destNote.insertParagraph(paraText, insertionIndex, 'text')
+  destNote.insertParagraph(paraText, insertionIndex, 'text')
 }
 
 /**
@@ -272,7 +277,7 @@ export function getParagraphBlock(
 /**
  * Get the paragraphs beneath a title/heading in a note (optionally return the contents without the heading)
  * It uses getParagraphBlock() which won't return the title of a note in the first block.
- * TODO: this really needs a global setting for the two getParagraphBlock() settings that are currently fixed below.
+ * TODO(@jgclark): this really needs a global setting for the two getParagraphBlock() settings that are currently fixed below.
  * Note: Moved from helpers/paragraph.js to avoid circular depdency problem with getParagraphBlock()
  * @author @dwertheimer
  * @tests available in jest file
@@ -290,7 +295,7 @@ export function getBlockUnderHeading(note: CoreNoteFields, heading: TParagraph |
   }
   let paras: Array<TParagraph> = []
   if (headingPara?.lineIndex != null) {
-    // TODO: should use global settings here, not fixed as
+    // TODO(@jgclark): should use global settings here, not fixed as
     paras = getParagraphBlock(note, headingPara.lineIndex, true, true)
     // logDebug('getBlockUnderHeading', `= ${paras.length},${paras[0].type},${paras[0].headingLevel}`)
   }
@@ -318,6 +323,7 @@ export async function gatherMatchingLines(
   highlightResults: boolean = true,
   dateStyle: string = 'link',
   matchCase: boolean = false,
+  matchOnWordBoundaries: boolean = true,
 ): Promise<[Array<string>, Array<string>]> {
   logDebug('NPParagraph/gatherMatchingLines', `Looking for '${stringToLookFor}' in ${notes.length} notes`)
 
@@ -346,7 +352,7 @@ export async function gatherMatchingLines(
 
     // set up regex for searching, now with word boundaries on either side
     // find any matches
-    const stringToLookForWithDelimiters = `[\\b\\s\\^]${stringToLookFor}[\\b\\s\\$]`
+    const stringToLookForWithDelimiters = matchOnWordBoundaries ? `[\\b\\s\\^]${stringToLookFor}[\\b\\s\\$]` : stringToLookFor
     const re = matchCase ? new RegExp(stringToLookForWithDelimiters) : new RegExp(stringToLookForWithDelimiters, 'i')
     const matchingParas = n.paragraphs.filter((q) => re.test(q.content))
     for (const p of matchingParas) {
@@ -429,8 +435,8 @@ export function selectedLinesIndex(selection: TRange, paragraphs: $ReadOnlyArray
   if (endParaRange.start === endParaRange.end) {
     endParaRange = Editor.paragraphRangeAtCharacterIndex(selection.end - 1)
   }
-  clo(startParaRange, `selectedLinesIndex: startParaRange`)
-  clo(endParaRange, `selectedLinesIndex: endParaRange`)
+  // clo(startParaRange, `selectedLinesIndex: startParaRange`)
+  // clo(endParaRange, `selectedLinesIndex: endParaRange`)
 
   // Get the set of selected paragraphs (which can be different from selection),
   // and work out what selectedPara number(index) this selected selectedPara is
@@ -451,12 +457,44 @@ export function selectedLinesIndex(selection: TRange, paragraphs: $ReadOnlyArray
   if (lastSelParaIndex === 0) {
     lastSelParaIndex = firstSelParaIndex
   }
-  // console.log(`\t-> paraIndexes ${firstSelParaIndex}-${lastSelParaIndex}`)
+  // logDebug('selectedLinesIndex', `\t-> paraIndexes ${firstSelParaIndex}-${lastSelParaIndex}`)
   return [firstSelParaIndex, lastSelParaIndex]
 }
 
 /**
- * Remove all previously written blocks under a given heading in all notes (e.g. for deleting previous "TimeBlocks" or "SyncedCopoes")
+ * Check the block under a heading to see if it contains only synced copies
+ * @param {CoreNoteFields} note
+ * @param {boolean} runSilently
+ * @returns
+ */
+export async function blockContainsOnlySyncedCopies(note: CoreNoteFields, showErrorToUser: boolean = false): Promise<boolean> {
+  const heading = DataStore.settings.syncedCopiesTitle
+  const block = getBlockUnderHeading(note, heading, false)
+  // test every line of block and ensure every line contains a blockId
+  if (block?.length) {
+    for (const line of block) {
+      if (line.blockId || line.type === 'empty') {
+        continue
+      } else {
+        if (showErrorToUser) {
+          await showMessage(
+            `Non-synced items found in ${
+              note.title || ''
+            } under heading "${heading}". This function should only be run when the block under the heading contains only synced copies. Change your preference/settings so that the Synced Copies heading is distinct`,
+            'OK',
+            'Block under Heading Contains Non Synced Copies',
+          )
+        }
+        logDebug(pluginJson, `Non-synced items found in ${note.title || ''} under heading "${heading}"!`)
+        return false
+      }
+    }
+  }
+  return true
+}
+
+/**
+ * Remove all previously written blocks under a given heading in all notes (e.g. for deleting previous "TimeBlocks" or "SyncedCopies")
  * WARNING: This is DANGEROUS. Could delete a lot of content. You have been warned!
  * @author @dwertheimer
  * @param {Array<string>} noteTypes - the types of notes to look in -- e.g. ['calendar','notes']
@@ -464,20 +502,30 @@ export function selectedLinesIndex(selection: TRange, paragraphs: $ReadOnlyArray
  * @param {boolean} keepHeading - whether to leave the heading in place afer all the content underneath is
  * @param {boolean} runSilently - whether to show CommandBar popups confirming how many notes will be affected - you should set it to 'yes' when running from a template
  */
-export async function removeContentUnderHeadingInAllNotes(noteTypes: Array<string>, heading: string, keepHeading: boolean = false, runSilently: string = 'no'): Promise<void> {
+export async function removeContentUnderHeadingInAllNotes(
+  noteTypes: Array<string>,
+  heading: string,
+  keepHeading: boolean = false,
+  runSilently: string = 'no',
+  syncedOnly?: boolean,
+): Promise<void> {
   try {
     logDebug(`NPParagraph`, `removeContentUnderHeadingInAllNotes "${heading}" in ${noteTypes.join(', ')}`)
     // For speed, let's first multi-core search the notes to find the notes that contain this string
     let prevCopies = await DataStore.search(heading, noteTypes) // returns all the potential matches, but some may not be headings
     prevCopies = prevCopies.filter((n) => n.type === 'title' && n.content === heading)
     if (prevCopies.length) {
-      clo(prevCopies, `removeContentUnderHeadingInAllNotes: prevCopies`)
       let res = 'Yes'
-      if (!(runSilently === 'yes')) {
+      if (!/yes/i.test(runSilently)) {
         res = await showMessageYesNo(`Remove "${heading}"+content in ${prevCopies.length} notes?`)
       }
       if (res === 'Yes') {
         prevCopies.forEach(async (paragraph) => {
+          if (syncedOnly) {
+            //FIXME: I am here need to call the check and bail -- something like the following line:
+            if (!(await blockContainsOnlySyncedCopies(paragraph.note || Editor, true))) return
+            clo(prevCopies, `removeContentUnderHeadingInAllNotes: prevCopies`)
+          }
           if (paragraph.note != null) {
             await removeContentUnderHeading(paragraph.note, heading, false, keepHeading)
           }
@@ -609,55 +657,6 @@ export async function getSelectedParagraphLineIndex(): Promise<number> {
 }
 
 /**
- * Works out which line (if any) of the current note is project-style metadata line, defined as
- * - line starting 'project:' or 'medadata:'
- * - first line containing a @review() or @reviewed() mention
- * - first line starting with a hashtag
- * If these can't be found, then create a new line for this after the title line, and populate with optional metadataLinePlaceholder param.
- * @author @jgclark
- * @tests in jest file
- *
- * @param {TNote} note to use
- * @param {TNote} placeholder to use if we need to make a metadata line
- * @returns {number} the line number for the metadata line
- */
-export function getOrMakeMetadataLine(note: TNote, metadataLinePlaceholder: string = ''): number {
-  try {
-    const lines = note.paragraphs?.map((s) => s.content) ?? []
-    // logDebug('NPparagraph/getOrMakeMetadataLine', `Starting with ${lines.length} lines`)
-
-    // Belt-and-Braces: deal with empty or almost-empty notes
-    if (lines.length === 0) {
-      note.appendParagraph('<placeholder title>', 'title')
-      note.appendParagraph(metadataLinePlaceholder, 'text')
-      return 1
-    } else if (lines.length === 1) {
-      note.appendParagraph(metadataLinePlaceholder, 'text')
-      return 1
-    }
-
-    let lineNumber: number = NaN
-    for (let i = 1; i < lines.length; i++) {
-      if (lines[i].match(/^project:/i) || lines[i].match(/^metadata:/i) || lines[i].match(/^#[\w]/) || lines[i].match(/(@review|@reviewed)\(.+\)/)) {
-        lineNumber = i
-        break
-      }
-    }
-    // If no metadataPara found, then insert one straight after the title
-    if (Number.isNaN(lineNumber)) {
-      logWarn('NPparagraph/getOrMakeMetadataLine', `Warning: Can't find an existing metadata line, so will insert a new line for it after title`)
-      note.insertParagraph(metadataLinePlaceholder, 1, 'text')
-      lineNumber = 1
-    }
-    // logDebug('NPparagraph/getOrMakeMetadataLine', `Metadata line = ${lineNumber}`)
-    return lineNumber
-  } catch (error) {
-    logError('NPparagraph/getOrMakeMetadataLine', error.message)
-    return 0
-  }
-}
-
-/**
  * Convenience function to insert a paragraph into a note and ensure it's placed after the frontmatter
  * @param {CoreNotefields} note - the note to insert into
  * @param {string} content - the content to insert
@@ -696,13 +695,19 @@ export function noteHasContent(note: CoreNoteFields, content: string): boolean {
 export function moveParagraphToNote(para: TParagraph, destinationNote: TNote): boolean {
   // for now, insert at the top of the note
   if (!para || !para.note || !destinationNote) return false
+  const oldNote = para.note
   insertParagraph(destinationNote, para.rawContent)
   // dbw note: because I am nervous about people losing data, I am going to check that the paragraph has been inserted before deleting the original
   if (noteHasContent(destinationNote, para.content)) {
     para?.note?.removeParagraph(para) // this may not work if you are using Editor.* commands rather than Editor.note.* commands
     // $FlowFixMe - not in the type defs yet
-    if (Editor) DataStore.updateCache(Editor) // try to force Editor and Editor.note to be in synce after the move
+    DataStore.updateCache(oldNote) // try to force Editor and Editor.note to be in synce after the move
     return true
+  } else {
+    logDebug(
+      pluginJson,
+      `moveParagraphToNote Could not find ${para.content} in ${destinationNote.title || 'no title'} so could not move it to ${destinationNote.title || 'no title'}`,
+    )
   }
   return false
 }
@@ -731,7 +736,6 @@ export const getOverdueParagraphs = (paras: $ReadOnlyArray<TParagraph>, asOfDayS
   const openTasks = paras?.filter(isOpen) || []
   const effectivelyOverdues = openTasks.filter(paragraphIsEffectivelyOverdue)
   const datedOverdues = openTasks.filter((p) => hasOverdueTag(p, false, asOfDayString))
-  // FIXME: david you can't merge these because one fails and one succeeds every time? maybe?
   return [...datedOverdues, ...effectivelyOverdues].filter((t) => t.content !== '')
 }
 
@@ -785,8 +789,8 @@ export function testForOverdue(
   const reMATCHLINK = new RegExp(regexString, 'g')
   let links = para.content.match(reMATCHLINK) || []
   const todayString = todayRelevantFilename // .replace(`.${DataStore.defaultFileExtension}`, '')
-  let overdueLinks = [],
-    notOverdueLinks = []
+  let overdueLinks: Array<string> = [],
+    notOverdueLinks: Array<string> = []
   if (links && links?.length > 0) {
     links = links.map((link) => link.trim())
     overdueLinks = links.filter((link) => link.slice(1) < todayString)
@@ -971,13 +975,13 @@ export function getOverdueTags(para: TParagraph, asOfDayString?: string = ''): s
 const paragraphIsScheduled = (para: TParagraph): boolean => isScheduled(para.content)
 
 /**
- * Test whether a calendar note has any open tasks that are "effectively overdue" (a.k.a. "forgotten tasks")
+ * Test whether a paragraph in a calendar note is "effectively overdue" (a.k.a. "forgotten tasks")
  * (i.e. the task is open, does not include a >scheduling date of any kind, and this type of note's date is in the past)
  * Immediately returns false if the note is not a calendar note
  * e.g. a task on yesterday's daily note would now be "overdue"
  * an open task on last week's weekly note would now be "overdue"
  * @author @dwertheimer
- * @param {TParagraph} note
+ * @param {TParagraph} paragraph
  * @returns {boolean} - true if the task is open
  */
 export function paragraphIsEffectivelyOverdue(paragraph: TParagraph): boolean {
@@ -1029,20 +1033,32 @@ export function paragraphIsEffectivelyOverdue(paragraph: TParagraph): boolean {
 
 /**
  * Calculate the number of days until due (or overdue) for a paragraph to today
- * TODO: Need to implement the days til due part (overdue works now)
+ * Assumes the paragraph has a >date tag; use helpers/NPdateTime.js/getDaysToCalendarNote for paragraphs that don't have a >date tag
  * The tricky part is that we have to start counting with the end of the period (e.g. the end of the week, month, etc.)
  * @author @dwertheimer
  * @param {TParagraph} paragraph
  * @param {string} toISODate - the date to calculate overdue to. Defaults to today
  * @returns {number} - the number of days overdue
+ * @tests in jest file
  */
 export function getDaysTilDue(paragraph: TParagraph, toISODate: string = getTodaysDateHyphenated()): number {
-  const paraDateTagDetails = getTagDetails(paragraph, toISODate)
-  clo(paragraph, 'para')
-  clo(paraDateTagDetails, 'paraDateTagDetails')
-  const endDate = paragraph.date ? endOfPeriod(paraDateTagDetails?.linkType, paragraph.date) : null
-  const daysTilDue = calculateDaysOverdue(endDate, toISODate)
-  return daysTilDue
+  const paraDateTagDetails: OverdueDetails | false = getTagDetails(paragraph, toISODate)
+  // clo(paragraph, 'getDaysTilDue: calculating days til due for paragraph')
+  // clo(paraDateTagDetails, 'getDaysTilDue: paraDateTagDetails')
+  if (paraDateTagDetails && paraDateTagDetails.linkType && paragraph.date) {
+    const endDate = endOfPeriod(paraDateTagDetails.linkType, paragraph.date)
+    if (endDate) {
+      // logDebug(`getDaysTilDue: endDate:${endDate.toString()} toISODate:${toISODate}`)
+      const daysTilDue = calculateDaysOverdue(endDate, toISODate)
+      return daysTilDue
+    } else {
+      logError(`getDaysTilDue: could not get end of period for ${endDate || ''}`)
+      return NaN
+    }
+  } else {
+    const daysSinceNote = getDaysToCalendarNote(paragraph, toISODate)
+    return daysSinceNote || NaN
+  }
 }
 
 /**
@@ -1073,16 +1089,18 @@ function endOfPeriod(periodType: string, paraDate: Date): Date | null {
 
 /**
  *  Calculate the number of days until due for a given date (negative if overdue)
- * @param {*} fromDate
- * @param {*} toDate
- * @returns
+ * TODO: tests!
+ * @author @dwertheimer
+ * @param {string|Date} fromDate (in YYYY-MM-DD format if string)
+ * @param {string|Date} toDate (in YYYY-MM-DD format if string)
+ * @returns {number}
  */
-function calculateDaysOverdue(fromDate: string, toDate: string): number {
+export function calculateDaysOverdue(fromDate: string | Date, toDate: string | Date): number {
   if (!fromDate || !toDate) {
     return 0
   }
 
-  const fromDateMom = moment(fromDate)
+  const fromDateMom = moment(fromDate, 'YYYY-MM-DD')
   const toDateMom = moment(toDate, 'YYYY-MM-DD')
   const diffDays = fromDateMom.diff(toDateMom, 'days', true) // negative for overdue
 
@@ -1185,39 +1203,52 @@ export function paragraphMatches(paragraph: TParagraph, fieldsObject: any, field
 }
 
 /**
- * Because a paragraph may have been deleted or changed, we need to find the paragraph in the note
- * @param { Array<TParagraph>} parasToLookIn - NP paragraph list to search
+ * Find the paragraph in the note, from its content
+ * @author @dwertheimer + @jgclark
+ * @param {Array<TParagraph>} parasToLookIn - NP paragraph list to search
  * @param {any} paragraphDataToFind - object with the static data fields to match (e.g. filename, rawContent, type)
- * @param {Array<string>} fieldsToMatch - (optional) array of fields to match (e.g. filename, lineIndex) -- these two fields are required. default is ['filename', 'rawContent']
+ * @param {Array<string>} fieldsToMatch - (optional) array of fields to match (e.g. filename, lineIndex). default = ['filename', 'rawContent']
+ * @param {boolean} ifMultipleReturnFirst? - (optional) if there are multiple matches, return the first one (default: false)
  * @returns {TParagraph | null } - the matching paragraph, or null if not found
- * @author @dwertheimer
+ * @author @dwertheimer updated by @jgclark
  * @tests exist
  */
-export function findParagraph(parasToLookIn: $ReadOnlyArray<TParagraph>, paragraphDataToFind: any, fieldsToMatch: Array<string> = ['filename', 'rawContent']): TParagraph | null {
+export function findParagraph(
+  parasToLookIn: $ReadOnlyArray<TParagraph>,
+  paragraphDataToFind: any,
+  fieldsToMatch: Array<string> = ['filename', 'rawContent'],
+  ifMultipleReturnFirst: boolean = false,
+): TParagraph | null {
   // clo(parasToLookIn, `findParagraph: parasToLookIn.length=${parasToLookIn.length}`)
   const potentials = parasToLookIn.filter((p) => paragraphMatches(p, paragraphDataToFind, fieldsToMatch))
   if (potentials?.length === 1) {
     // clo(potentials[0], `findParagraph potential matches=${potentials.length}, here's the one:`)
-    logDebug('findParagraph', `1 potential match: rawContent: <${potentials[0].rawContent}>`)
+    logDebug('findParagraph', `1 potential match: rawContent:"${potentials[0].rawContent}"`)
     return potentials[0]
   } else if (potentials.length > 1) {
     // clo(potentials[0], `findParagraph potential matches=${potentials.length}, here's the first:`)
     logDebug('findParagraph', `first potential match: rawContent: <${potentials[0].rawContent}>`)
-    const matchIndexes = potentials.find((p) => p.lineIndex === paragraphDataToFind.lineIndex)
-    if (matchIndexes) {
-      return matchIndexes
+    if (ifMultipleReturnFirst) {
+      // If we want to always return the first match, do so.
+      return potentials[0]
+    } else {
+      // Otherwise check to see if lineIndex matches as well, and only then return the first match
+      const matchIndexes = potentials.find((p) => p.lineIndex === paragraphDataToFind.lineIndex)
+      if (matchIndexes) {
+        return matchIndexes
+      }
+      logDebug(
+        pluginJson,
+        `findParagraph: found more than one paragraph in note "${paragraphDataToFind.filename}" that matches ${JSON.stringify(
+          paragraphDataToFind,
+        )}. Could not determine which one to use.`,
+      )
+      return null
     }
-    logDebug(
-      pluginJson,
-      `findParagraph: found more than one paragraph in note "${paragraphDataToFind.filename}" that matches ${JSON.stringify(
-        paragraphDataToFind,
-      )}. Could not determine which one to use.`,
-    )
-    return null
   } else {
     // no matches
     // const p = paragraphDataToFind
-    logDebug(pluginJson, `findParagraph: found no paragraphs in note "${paragraphDataToFind.filename}" that matches ${JSON.stringify(paragraphDataToFind)}`)
+    logDebug(pluginJson, `findParagraph: found no paragraphs in note "${paragraphDataToFind.filename}" that matches ${JSON.stringify(paragraphDataToFind.rawContent)}`)
     // logDebug(`\n**** Looking for "${p[fieldsToMatch[0]]}" "${p[fieldsToMatch[1]]}" in the following list`)
     //$FlowIgnore
     // parasToLookIn.forEach((p) => logDebug(pluginJson, `\t findParagraph: ${p[fieldsToMatch[0]]} ${p[fieldsToMatch[1]]}`))
@@ -1259,72 +1290,52 @@ export function getParagraphFromStaticObject(staticObject: any, fieldsToMatch: A
 
 /**
  * Highlight the given Paragraph details in the open editor.
- * The static object that's passed in must have at least the following TParagraph-type fields populated: filename, rawContent.
- * Note: Assumes the right note is already open.
+ * The static object that's passed in must have at least the following TParagraph-type fields populated: filename and rawContent (or content, though this is naturally less exact).
+ * If 'thenStopHighlight' is true, the cursor will be moved to the start of the paragraph after briefly flashing the whole line. This is to prevent starting to type and inadvertdently removing the whole line.
  * @author @jgclark
- * @param {string} rawContentToFind
- * @results {boolean}
+ * @param {any} objectToTest
+ * @param {boolean} thenStopHighlight?
+ * @results {boolean} success?
  */
-export function highlightParagraphInEditor(objectToTest: any): boolean {
+export function highlightParagraphInEditor(objectToTest: any, thenStopHighlight: boolean = false): boolean {
   try {
+    logDebug('highlightParagraphInEditor', `Looking for <${objectToTest.rawContent ?? objectToTest.content}>`)
+
     const { paragraphs } = Editor
-    const res: TParagraph | null = findParagraph(paragraphs, objectToTest, ['filename', 'rawContent'])
-    if (res) {
-      const lineIndex = res.lineIndex
-      Editor.highlight(res)
-      logDebug(pluginJson, `Found para to highlight at lineIndex ${String(lineIndex)}`)
+    const resultPara: TParagraph | null = objectToTest.rawContent
+      ? findParagraph(paragraphs, objectToTest, ['filename', 'rawContent'])
+      : findParagraph(paragraphs, objectToTest, ['filename', 'content'])
+    if (resultPara) {
+      const lineIndex = resultPara.lineIndex
+      Editor.highlight(resultPara)
+      logDebug('highlightParagraphInEditor', `Found para to highlight at lineIndex ${String(lineIndex)}`)
+      const paraRange = resultPara.contentRange
+      if (thenStopHighlight && paraRange) {
+        logDebug('highlightParagraphInEditor', `Now moving cursor to highlight at charIndex ${String(paraRange.start)}`)
+        Editor.highlightByIndex(paraRange.start, 0)
+      }
       return true
     } else {
-      logWarn(pluginJson, `Sorry, couldn't find paragraph with rawContent <${objectToTest.rawContent}> to highlight in open note`)
+      logWarn('highlightParagraphInEditor', `Sorry, couldn't find paragraph with rawContent <${objectToTest.rawContent}> to highlight in open note`)
       return false
     }
   } catch (error) {
-    logError(pluginJson, JSP(error))
+    logError('highlightParagraphInEditor', `highlightParagraphInEditor: ${error.message}`)
     return false
   }
 }
 
 /**
- * Appends a '@done(...)' date to the given paragraph if the user has turned on the setting 'add completion date'.
- * @param {TParagraph} para
- * @returns
- */
-export function markComplete(para: TParagraph): boolean {
-  if (para) {
-    const doneString = DataStore.preference('isAppendCompletionLinks') ? ` @done(${nowShortDateTimeISOString})` : ''
-
-    if (para.type === 'open') {
-      para.type = 'done'
-      para.content += doneString
-      para.note?.updateParagraph(para)
-      logDebug('completeItem', `updated para ${para.content}`)
-      return true
-    } else if (para.type === 'checklist') {
-      para.type = 'checklistDone'
-      para.note?.updateParagraph(para)
-      logDebug('completeItem', `updated para ${para.content}`)
-      return true
-    } else {
-      logWarn('completeItem', `unexpected para type ${para.type}, so won't continue`)
-      return false
-    }
-  } else {
-    logError(pluginJson, `markComplete: para is null`)
-    return false
-  }
-}
-
-/**
- * Complete a task/checklist item (given by 'rawContent') in note (given by 'filenameIn').
+ * Return a TParagraph object by an exact match to 'content' in file 'filenameIn'. If it fails to find a match, it returns false.
  * Designed to be called when you're not in an Editor (e.g. an HTML Window).
- * Appends a '@done(...)' date to the line if the user has selected to 'add completion date'.
+ * @author @jgclark
  * @param {string} filenameIn to look in
- * @param {string} rawContent to find
- * @returns {boolean} true if succesful, false if unsuccesful
+ * @param {string} content to find
+ * @returns {TParagraph | boolean} TParagraph if succesful, false if unsuccesful
  */
-export function completeItem(filenameIn: string, rawContent: string): boolean {
+export function findParaFromStringAndFilename(filenameIn: string, content: string): TParagraph | boolean {
   try {
-    logDebug('completeItem', `starting with filename: ${filenameIn}, rawContent: ${rawContent}`)
+    // logDebug('NPP/findParaFromStringAndFilename', `starting with filename: ${filenameIn}, content: {${content}}`)
     let filename = filenameIn
     if (filenameIn === 'today') {
       filename = getTodaysDateUnhyphenated()
@@ -1339,25 +1350,524 @@ export function completeItem(filenameIn: string, rawContent: string): boolean {
       if (thisNote.paragraphs.length > 0) {
         let c = 0
         for (const para of thisNote.paragraphs) {
-          if (para.rawContent === rawContent) {
-            logDebug('completeItem', `found matching para ${c} of type ${para.type}: ${rawContent}`)
-            // Append @done(...) string (if user preference wishes this)
-            return markComplete(para)
+          if (para.content === content) {
+            logDebug('NPP/findParaFromStringAndFilename', `found matching para #${c} of type ${para.type}: {${content}}`)
+            return para
           }
           c++
         }
-        logWarn('completeItem', `Couldn't find paragraph '${rawContent}' to complete`)
+        logWarn('NPP/findParaFromStringAndFilename', `Couldn't find paragraph {${content}} to complete`)
         return false
       } else {
-        logInfo('completeItem', `Note '${filename}' appears to be empty?`)
+        logInfo('NPP/findParaFromStringAndFilename', `Note '${filename}' appears to be empty?`)
         return false
       }
     } else {
-      logWarn('completeItem', `Can't find note '${filename}'`)
+      logWarn('NPP/findParaFromStringAndFilename', `Can't find note '${filename}'`)
       return false
     }
   } catch (error) {
-    logError('completeItem', `${error.message} for note '${filenameIn}'`)
+    logError(pluginJson, `NPP/findParaFromStringAndFilename: ${error.message} for note '${filenameIn}'`)
     return false
   }
+}
+
+/**
+ * Appends a '@done(...)' date to the given paragraph if the user has turned on the setting 'add completion date'.
+ * TODO: Cope with non-daily scheduled dates.
+ * @author @jgclark
+ * @param {TParagraph} para
+ * @param {boolean} useScheduledDateAsCompletionDate?
+ * @returns {boolean} success?
+ */
+export function markComplete(para: TParagraph, useScheduledDateAsCompletionDate: boolean = false): boolean {
+  if (para) {
+    // Default to using current date/time
+    let dateString = nowShortDateTimeISOString
+    if (useScheduledDateAsCompletionDate) {
+      // But use scheduled date instead if found
+      if (hasScheduledDate(para.content)) {
+        const captureArr = para.content.match(RE_FIRST_SCHEDULED_DATE_CAPTURE) ?? []
+        clo(captureArr)
+        dateString = captureArr[1]
+        logDebug('markComplete', `will use scheduled date ${dateString} as completion date`)
+      } else {
+        // Use date of the note if it has one. (What does para.note.date return for non-daily calendar notes?)
+        if (para.note?.type === 'Calendar' && para.note.date) {
+          dateString = hyphenatedDate(para.note.date)
+          logDebug('markComplete', `will use date of note ${dateString} as completion date`)
+        }
+      }
+    } else {
+      dateString = nowShortDateTimeISOString
+    }
+    const doneString = DataStore.preference('isAppendCompletionLinks') ? ` @done(${dateString})` : ''
+
+    if (para.type === 'open') {
+      para.type = 'done'
+      para.content += doneString
+      para.note?.updateParagraph(para)
+      logDebug('markComplete', `updated para <${para.content}>`)
+      return true
+    } else if (para.type === 'checklist') {
+      para.type = 'checklistDone'
+      para.note?.updateParagraph(para)
+      logDebug('markComplete', `updated para <${para.content}>`)
+      return true
+    } else {
+      logWarn('markComplete', `unexpected para type ${para.type}, so won't continue`)
+      return false
+    }
+  } else {
+    logError(pluginJson, `markComplete: para is null`)
+    return false
+  }
+}
+
+/**
+ * Change para type of the given paragraph to cancelled (for both tasks/checklists)
+ * @param {TParagraph} para
+ * @returns {boolean} success?
+ */
+export function markCancelled(para: TParagraph): boolean {
+  if (para) {
+    if (para.type === 'open') {
+      para.type = 'cancelled'
+      para.note?.updateParagraph(para)
+      logDebug('markCancelled', `updated para <${para.content}>`)
+      return true
+    } else if (para.type === 'checklist') {
+      para.type = 'checklistCancelled'
+      para.note?.updateParagraph(para)
+      logDebug('markCancelled', `updated para <${para.content}>`)
+      return true
+    } else if (para.type === 'cancelled' || para.type === 'checklistCancelled') {
+      logInfo('markCancelled', `para <${para.content}> is already cancelled: is this a duplicate line?`)
+      return false
+    } else {
+      logWarn('markCancelled', `unexpected para type ${para.type}, so won't continue`)
+      return false
+    }
+  } else {
+    logError(pluginJson, `markCancelled: para is null`)
+    return false
+  }
+}
+
+/**
+ * Complete a task/checklist item (given by 'content') in note (given by 'filenameIn').
+ * Designed to be called when you're not in an Editor (e.g. an HTML Window).
+ * Appends a '@done(...)' date to the line if the user has selected to 'add completion date'.
+ * @author @jgclark
+ * @param {string} filenameIn to look in
+ * @param {string} content to find
+ * @returns {boolean} success?
+ */
+export function completeItem(filenameIn: string, content: string): boolean {
+  try {
+    logDebug('NPP/completeItem', `starting with filename: ${filenameIn}, content: <${content}>`)
+    const possiblePara = findParaFromStringAndFilename(filenameIn, content)
+    if (typeof possiblePara === 'boolean') {
+      return false
+    }
+    return markComplete(possiblePara, false)
+  } catch (error) {
+    logError(pluginJson, `NPP/completeItem: ${error.message} for note '${filenameIn}'`)
+    return false
+  }
+}
+
+/**
+ * Complete a task/checklist item (given by 'content') in note (given by 'filenameIn').
+ * Designed to be called when you're not in an Editor (e.g. an HTML Window).
+ * Appends a '@done(...)' date to the line if the user has selected to 'add completion date' - but uses completion date of the day it was scheduled to be done.
+ * @author @jgclark
+ * @param {string} filenameIn to look in
+ * @param {string} content to find
+ * @returns {boolean} true if succesful, false if unsuccesful
+ */
+export function completeItemEarlier(filenameIn: string, content: string): boolean {
+  try {
+    logDebug('NPP/completeItemEarlier', `starting with filename: ${filenameIn}, content: <${content}>`)
+    const possiblePara = findParaFromStringAndFilename(filenameIn, content)
+    if (typeof possiblePara === 'boolean') {
+      return false
+    }
+    return markComplete(possiblePara, true)
+  } catch (error) {
+    logError(pluginJson, `NPP/completeItemEarlier: ${error.message} for note '${filenameIn}'`)
+    return false
+  }
+}
+
+/**
+ * Cancel a task/checklist item (given by 'content') in note (given by 'filenameIn').
+ * Designed to be called when you're not in an Editor (e.g. an HTML Window).
+ * @author @jgclark
+ * @param {string} filenameIn to look in
+ * @param {string} content to find
+ * @returns {boolean} true if succesful, false if unsuccesful
+ */
+export function cancelItem(filenameIn: string, content: string): boolean {
+  try {
+    logDebug('NPP/cancelItem', `starting with filename: ${filenameIn}, content: ${content}`)
+    const possiblePara = findParaFromStringAndFilename(filenameIn, content)
+    if (typeof possiblePara === 'boolean') {
+      return false
+    }
+    return markCancelled(possiblePara)
+  } catch (error) {
+    logError(pluginJson, `NPP/cancelItem: ${error.message} for note '${filenameIn}'`)
+    return false
+  }
+}
+
+/**
+ * Prepend a todo (task or checklist) to a calendar note
+ * @author @jgclark
+ * @param {"task" | "checklist"} todoTypeName 'English' name of type of todo
+ * @param {string} NPDateStr the usual calendar titles, plus YYYYMMDD
+ * @param {string} todoTextArg text to prepend. If empty or missing, then will ask user for it
+ */
+export async function prependTodoToCalendarNote(todoTypeName: 'task' | 'checklist', NPDateStr: string, todoTextArg: string = ''): Promise<void> {
+  // logDebug('NPP/prependTodoToCalendarNote', `Starting with NPDateStr: ${NPDateStr}, todoTypeName: ${todoTypeName}, todoTextArg: ${todoTextArg}`)
+  try {
+    const todoType = todoTypeName === 'task' ? 'open' : 'checklist'
+    // Get calendar note to use
+    const note = DataStore.calendarNoteByDateString(NPDateStr)
+    if (note != null) {
+      // Get input either from passed argument or ask user
+      const todoText =
+        todoTextArg != null && todoTextArg !== '' ? todoTextArg : await CommandBar.showInput(`Type the ${todoTypeName} text to add`, `Add ${todoTypeName} '%@' to ${NPDateStr}`)
+      logDebug('NPP/prependTodoToCalendarNote', `- Prepending type ${todoType} '${todoText}' to '${displayTitle(note)}'`)
+      smartPrependPara(note, todoText, todoType)
+
+      // Ask for cache refresh for this note
+      DataStore.updateCache(note, false)
+    } else {
+      logError('NPP/prependTodoToCalendarNote', `- Can't get calendar note for ${NPDateStr}`)
+    }
+  } catch (err) {
+    logError('NPP/prependTodoToCalendarNote', `${err.name}: ${err.message}`)
+    await showMessage(err.message)
+  }
+}
+
+/**
+ * Move a task or checklist from one calendar note to another.
+ * It's designed to be used when the para itself is not available; the para will try to be identified from its filename and content, and it will throw an error if it fails.
+ * The para will be *prepended* to the destination note in a smart way, to avoid frontmatter.
+ * @author @jgclark
+ * @param {"task" | "checklist"} todoTypeName 'English' name of type of todo
+ * @param {string} NPFromDateStr from date (the usual NP calendar date strings, plus YYYYMMDD)
+ * @param {string} NPToDateStr to date (the usual NP calendar date strings, plus YYYYMMDD)
+ * @param {string} paraContent content of the para to move.
+ */
+export function moveItemBetweenCalendarNotes(NPFromDateStr: string, NPToDateStr: string, paraContent: string): boolean {
+  logDebug(pluginJson, `starting moveItemBetweenCalendarNotes for ${NPFromDateStr} to ${NPToDateStr}`)
+  try {
+    // Get calendar note to use
+    const fromNote = DataStore.calendarNoteByDateString(getAPIDateStrFromDisplayDateStr(NPFromDateStr))
+    const toNote = DataStore.calendarNoteByDateString(getAPIDateStrFromDisplayDateStr(NPToDateStr))
+    // Don't proceed unless we have valid from/to notes
+    if (!fromNote || !toNote) {
+      logError('moveItemBetweenCalendarNotes', `- Can't get calendar note for ${NPFromDateStr} and/or ${NPToDateStr}`)
+      return false
+    }
+
+    // find para in the fromNote
+    const possiblePara: TParagraph | boolean = findParaFromStringAndFilename(fromNote.filename, paraContent)
+    if (typeof possiblePara === 'boolean') {
+      throw new Error('moveItemBetweenCalendarNotes: no para found')
+    }
+    const itemType = possiblePara?.type
+
+    // add to toNote
+    logDebug('moveItemBetweenCalendarNotes', `- Prepending type ${itemType} '${paraContent}' to '${displayTitle(toNote)}'`)
+    smartPrependPara(toNote, paraContent, itemType)
+
+    // Assuming that's not thrown an error, now remove from fromNote
+    logDebug('moveItemBetweenCalendarNotes', `- Removing line from '${displayTitle(fromNote)}'`)
+    fromNote.removeParagraph(possiblePara)
+
+    // Ask for cache refresh for these notes
+    DataStore.updateCache(fromNote, false)
+    DataStore.updateCache(toNote, false)
+
+    return true
+  } catch (err) {
+    logError('moveItemBetweenCalendarNotes', `${err.name}: ${err.message}`)
+    return false
+  }
+}
+
+type TBasicPara = {
+  type: ParagraphType,
+  content: string,
+  rawContent: string,
+  lineIndex: number,
+}
+
+/**
+ * Take a (multi-line) raw content block, typically from the editor, and turn it into an array of TParagraph-like objects
+ * Designed to be used with Editor.content that is available in a trigger, before Editor.note.paragraphs is updated.
+ * Only writes "type", "content", "rawContent", "lineIndex" fields.
+ * @author @jgclark
+ * @param {string} content to parse
+ * @returns {Array<any>} array of TParagraph-like objects
+ * @tests in jest file
+ */
+export function makeBasicParasFromContent(content: string): Array<any> {
+  try {
+    const allLines = content.split('\n')
+    logDebug('makeBasicParasFromEditorContent', `Starting with ${String(allLines.length)} lines of editorContent}`)
+    // read the user's prefs for what counts as a todo
+    const ASTERISK_TODO = DataStore.preference('isAsteriskTodo') ? '*' : ''
+    const DASH_TODO = DataStore.preference('isDashTodo') ? '-' : ''
+    const NUMBER_TODO = DataStore.preference('isNumbersTodo') ? '|\\d+\\.' : ''
+    // previously used /^\s*([\*\-]\s[^\[]|[\*\-]\s\[\s\])/
+    const RE_OPEN_TASK = new RegExp(`^\\s*(([${DASH_TODO}${ASTERISK_TODO}]${NUMBER_TODO})\\s(?!\\[[x\\-\\]])(\\[[\\s>]\\])?)`)
+    // logDebug('makeBasicParas...', `RE_OPEN_TASK: ${String(RE_OPEN_TASK)}`)
+    const ASTERISK_BULLET = DataStore.preference('isAsteriskTodo') ? '' : '\\*'
+    const DASH_BULLET = DataStore.preference('isDashTodo') ? '' : '\\-'
+    const RE_BULLET_LIST = new RegExp(`^\\s*([${DASH_BULLET}${ASTERISK_BULLET}])\\s+`)
+    // logDebug('makeBasicParas...', `RE_BULLET_LIST: ${String(RE_BULLET_LIST)}`)
+
+    const basicParas: Array<TBasicPara> = []
+    let c = 0
+    for (const thisLine of allLines) {
+      const thisBasicPara: TBasicPara = {
+        type: 'text',
+        lineIndex: c,
+        rawContent: thisLine,
+        content: thisLine.slice(getLineMainContentPos(thisLine)),
+      }
+      if (/^#{1,5}\s+/.test(thisLine)) {
+        thisBasicPara.type = 'title'
+      } else if (RE_OPEN_TASK.test(thisLine)) {
+        thisBasicPara.type = 'open'
+      } else if (/^\s*(\+\s[^\[]|\+\s\[ \])/.test(thisLine)) {
+        thisBasicPara.type = 'checklist'
+      } else if (/^\s*([\*\-]\s\[>\])/.test(thisLine)) {
+        thisBasicPara.type = 'scheduled'
+      } else if (/^\s*(\+\s\[>\])/.test(thisLine)) {
+        thisBasicPara.type = 'checklistScheduled'
+      } else if (/^\s*([\*\-]\s\[x\])/.test(thisLine)) {
+        thisBasicPara.type = 'done'
+      } else if (/^\s*([\*\-]\s\[\-\])/.test(thisLine)) {
+        thisBasicPara.type = 'cancelled'
+      } else if (/^\s*(\+\s\[x\])/.test(thisLine)) {
+        thisBasicPara.type = 'checklistDone'
+      } else if (/^\s*(\+\s\[\-\])/.test(thisLine)) {
+        thisBasicPara.type = 'checklistCancelled'
+      } else if (RE_BULLET_LIST.test(thisLine)) {
+        thisBasicPara.type = 'list'
+      } else if (/^\s*>\s/.test(thisLine)) {
+        thisBasicPara.type = 'quote'
+      } else if (thisLine === '---') {
+        thisBasicPara.type = 'separator'
+      } else if (thisLine === '') {
+        thisBasicPara.type = 'empty'
+      } else {
+        thisBasicPara.type = 'text'
+      }
+      basicParas.push(thisBasicPara)
+      // logDebug('makeBasicParas...', `${c}: ${thisBasicPara.type}: ${thisLine}`)
+      c++
+    }
+    return basicParas
+  } catch (error) {
+    logError('makeBasicParasFromEditorContent', `${error.message} for input '${content}'`)
+    return []
+  }
+}
+
+/**
+ * Get the number of days to/from the date of a paragraph's contaier -- calendar note -- to another date (defaults to today's date)
+ * @param {TParagraph} para - the paragraph
+ * @param {string|undefined} asOfDayString - the date to compare to
+ * @returns {number} the number of days between the two dates (negative for in past, positive for in future), or null if there is no date
+ */
+export function getDaysToCalendarNote(para: TParagraph, asOfDayString?: string = ''): number | null {
+  if (para.noteType !== 'Calendar') return null
+  if (!para.note) return null
+  const noteDate = para.note.title || ''
+  const date = asOfDayString?.length ? asOfDayString : getTodaysDateHyphenated()
+  return calculateDaysOverdue(noteDate, date)
+}
+
+/**
+ * Toggle type between (open) Task and Checklist for a given line in note identified by filename
+ * @author @jgclark
+ * @param {string} filename of note
+ * @param {string} content line to identify and change
+ * @returns {ParagraphType} new type
+ */
+export function toggleTaskChecklistParaType(filename: string, content: string): string {
+  try {
+    // find para
+    const possiblePara: TParagraph | boolean = findParaFromStringAndFilename(filename, content)
+    if (typeof possiblePara === 'boolean') {
+      throw new Error('toggleTaskChecklistParaType: no para found')
+    }
+    // Get the paragraph to change
+    const thisPara = possiblePara
+    const thisNote = thisPara.note
+    const existingType = thisPara.type
+    logDebug('toggleTaskChecklistParaType', `toggling in filename: ${filename}`)
+    if (existingType === 'checklist') {
+      thisPara.type = 'open'
+      // $FlowIgnore(incompatible-use)
+      thisNote.updateParagraph(thisPara)
+      return 'open'
+    } else {
+      thisPara.type = 'checklist'
+      // $FlowIgnore(incompatible-use)
+      thisNote.updateParagraph(thisPara)
+      return 'checklist'
+    }
+  } catch (error) {
+    logError('toggleTaskChecklistParaType', error.message)
+    return '(error)'
+  }
+}
+
+/**
+ * Remove any scheduled date (e.g. >YYYY-MM-DD or >YYYY-Www) from given line in note identified by filename
+ * @author @jgclark
+ * @param {string} filename of note
+ * @param {string} content line to identify and change
+ * @returns {boolean} success?
+ */
+export function unscheduleItem(filename: string, content: string): boolean {
+  try {
+    // find para
+    const possiblePara: TParagraph | boolean = findParaFromStringAndFilename(filename, content)
+    if (typeof possiblePara === 'boolean') {
+      throw new Error('unscheduleItem: no para found')
+    }
+    // Get the paragraph to change
+    const thisPara = possiblePara
+    const thisNote = thisPara.note
+    // Find and then remove any scheduled dates
+    const thisLine = possiblePara.content
+    logDebug('unscheduleItem', `unscheduleItem('${thisLine}'`)
+    thisPara.content = replaceArrowDatesInString(thisLine, '')
+    logDebug('unscheduleItem', `unscheduleItem('${thisPara.content}'`)
+    // $FlowIgnore(incompatible-use)
+    thisNote.updateParagraph(thisPara)
+    return true
+  } catch (error) {
+    logError('unscheduleItem', error.message)
+    return false
+  }
+}
+
+export type ParentParagraphs = {
+  parent: TParagraph,
+  children: Array<TParagraph>,
+}
+
+/**
+ * By definition, a paragraph's .children() method API returns an array of TParagraphs indented underneath it
+ * a grandparent will have its children and grandchildren listed in its .children() method and the child will have the grandchildren also
+ * This function returns only the children of the paragraph, not any descendants, eliminating duplicates
+ * Every paragraph sent into this function will be listed as a parent in the resulting array of ParentParagraphs
+ * Use removeParentsWhoAreChildren() afterwards to remove any children from the array of ParentParagraphs
+ * (if you only want a paragraph to be listed in one place in the resulting array of ParentParagraphs)
+ * @param {Array<TParagraph>} paragraphs - array of paragraphs
+ * @returns {Array<ParentParagraphs>} - array of parent paragraphs with their children
+ */
+export function getParagraphParentsOnly(paragraphs: Array<TParagraph>): Array<ParentParagraphs> /* tag: children */ {
+  const parentsOnly = []
+  for (let i = 0; i < paragraphs.length; i++) {
+    const para = paragraphs[i]
+    logDebug('getParagraphParentsOnly', `para: "${para.content}"`)
+    const childParas = getChildParas(para, paragraphs)
+    parentsOnly.push({ parent: para, children: childParas })
+  }
+  return parentsOnly
+}
+
+/**
+ * Remove any children from being listed as parents in the array of ParentParagraphs
+ * This function should be called after getParagraphParentsOnly()
+ * If a paragraph is listed as a child, it will not be listed as a parent
+ * The paragraphs need to be in lineIndex order for this to work
+ * @param {Array<ParentParagraphs>} everyParaIsAParent - array of parent paragraphs with their children
+ * @returns {Array<ParentParagraphs>} - array of parent paragraphs with their children
+ */
+export function removeParentsWhoAreChildren(everyParaIsAParent: Array<ParentParagraphs>): Array<ParentParagraphs> {
+  const childrenSeen: Array<TParagraph> = []
+  const parentsOnlyAtTop: Array<ParentParagraphs> = []
+  for (let i = 0; i < everyParaIsAParent.length; i++) {
+    const p = everyParaIsAParent[i]
+    if (childrenSeen.includes(p.parent)) {
+      p.children.length ? childrenSeen.push(...p.children) : null
+      continue // do not list this as a parent, because another para has it as a child
+    }
+    // concat all p.children to the childrenSeen array (we know they are unique, so no need to check)
+    p.children.length ? childrenSeen.push(...p.children) : null
+    parentsOnlyAtTop.push(p)
+  }
+  return parentsOnlyAtTop
+}
+/**
+ * Get the direct children paragraphs of a given paragraph (ignore [great]grandchildren)
+ * NOTE: the passed "paragraphs" array can be mutated if removeChildrenFromTopLevel is true
+ * @param {TParagraph} para - the parent paragraph
+ * @param {Array<TParagraph>} paragraphs - array of all paragraphs
+ * @returns {Array<TParagraph>} - array of children paragraphs (NOTE: the passed "paragraphs" array can be mutated if removeChildrenFromTopLevel is true)
+ */
+export function getChildParas(para: TParagraph, paragraphs: Array<TParagraph>): Array<TParagraph> {
+  const childParas = []
+  const allChildren = para.children()
+  const indentedChildren = getIndentedNonTaskLinesUnderPara(para, paragraphs)
+  // concatenate the two arrays, but remove any duplicates that have the same lineIndex
+  const allChildrenWithDupes = allChildren.concat(indentedChildren)
+  const allChildrenNoDupes = allChildrenWithDupes.filter((p, index) => allChildrenWithDupes.findIndex((p2) => p2.lineIndex === p.lineIndex) === index)
+
+  if (!allChildrenNoDupes.length) {
+    return []
+  }
+
+  // someone could accidentally indent twice
+  const minIndentLevel = Math.min(...allChildrenNoDupes.map((p) => p.indents))
+
+  for (const child of allChildrenNoDupes) {
+    const childIndentLevel = child.indents
+
+    if (childIndentLevel === minIndentLevel) {
+      childParas.push(child)
+    }
+  }
+
+  clo(childParas, `getChildParas of para:"${para.content}", children.length=${allChildrenNoDupes.length}. reduced to:${childParas.length}`)
+
+  return childParas
+}
+
+/**
+ * Get any indented text paragraphs underneath a given paragraph, excluding tasks
+ * Doing this to pick up any text para types that may have been missed by the .children() method, which only gets task paras
+ * @param {TParagraph} para - The parent paragraph
+ * @param {Array<TParagraph>} paragraphs - Array of all paragraphs
+ * @returns {Array<TParagraph>} - Array of indented paragraphs underneath the given paragraph
+ */
+export function getIndentedNonTaskLinesUnderPara(para: TParagraph, paragraphs: Array<TParagraph>): Array<TParagraph> {
+  const indentedParas = []
+
+  const thisIndentLevel = para.indents
+  let lastLineUsed = para.lineIndex
+
+  for (const p of paragraphs) {
+    // only get indented lines that are not tasks
+    if (p.lineIndex > para.lineIndex && p.indents > thisIndentLevel && lastLineUsed === p.lineIndex - 1) {
+      if (TASK_TYPES.includes(p.type)) break // stop looking if we hit a task
+      indentedParas.push(p)
+      lastLineUsed = p.lineIndex
+    }
+  }
+
+  return indentedParas
 }

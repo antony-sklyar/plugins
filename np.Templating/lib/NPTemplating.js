@@ -34,7 +34,7 @@ const codeBlockHasComment = (codeBlock = '') => {
 }
 
 const blockIsJavaScript = (codeBlock = '') => {
-  return codeBlock.includes('```javascript') || codeBlock.includes('```js')
+  return codeBlock.includes('```templatejs') // change from js/javascript to templatejs
 }
 
 const getCodeBlocks = (templateData = '') => {
@@ -76,8 +76,9 @@ const convertJavaScriptBlocksToTags = (templateData = '') => {
   codeBlocks.forEach((codeBlock) => {
     if (!codeBlockHasComment(codeBlock) && blockIsJavaScript(codeBlock)) {
       if (!codeBlock.includes('<%')) {
-        let newBlock = codeBlock.replace('```javascript\n', '').replace('```js\n', '').replace('```', '')
-        newBlock = '```javascript\n' + `<% ${newBlock} %>` + '\n```'
+        let newBlock = codeBlock.replace('```templatejs\n', '').replace('```', '')
+        // newBlock = '```javascript\n' + `<% ${newBlock} %>` + '\n```'
+        newBlock = `<% ${newBlock} -%>`
         result = result.replace(codeBlock, newBlock)
       }
     }
@@ -214,7 +215,9 @@ export default class NPTemplating {
     let result = str
     getCodeBlocks(str).forEach((codeBlock) => {
       let newCodeBlock = codeBlock
-      newCodeBlock = newCodeBlock.replace('```javascript\n', '').replace('```', '').replace(/\n\n/gi, '').replace(/\n/gi, '')
+      logDebug(pluginJson, `_removeWhitespaceFromCodeBlocks codeBlock before: "${newCodeBlock}"`)
+      newCodeBlock = newCodeBlock.replace('```javascript\n', '').replace(/```/gi, '').replace(/\n\n/gi, '').replace(/\n/gi, '')
+      logDebug(pluginJson, `_removeWhitespaceFromCodeBlocks codeBlock after: "${newCodeBlock}"`)
       result = result.replace(codeBlock, newCodeBlock)
     })
 
@@ -222,8 +225,12 @@ export default class NPTemplating {
   }
 
   static _filterTemplateResult(templateResult: string = ''): string {
-    let result = this._removeWhitespaceFromCodeBlocks(templateResult)
+    // NOTE: @codedungeon originally had this filterTemplateResult to remove code blocks from final output
+    // assuming the only reason someone would use code blocks was to create multi-line templating code
+    // but since users actually want to use code blocks in their templates, this is no longer a valid assumption
 
+    // let result = this_removeWhitespaceFromCodeBlocks(templateResult) // dbw removed the _removeWhitespaceFromCodeBlocks to leave code blocks intact
+    let result = templateResult
     result = result.replace('ejs', 'template')
     result = result.replace('If the above error is not helpful, you may want to try EJS-Lint:', '')
     // result = result.replace(/(?:https?|ftp):\/\/[\n\S]+/g, 'HTTP_REMOVED')
@@ -784,7 +791,8 @@ export default class NPTemplating {
     // process include, template, calendar, and note separately
     for (let tag of tags) {
       if (isCommentTag(tag)) {
-        newTemplateData = newTemplateData.replace(tag, '')
+        const regex = new RegExp(`${tag}[\\s\\r\\n]*`, 'g')
+        newTemplateData = newTemplateData.replace(regex, '')
         tag = '' // clear tag as it has been removed from process
       }
 
@@ -1205,9 +1213,7 @@ export default class NPTemplating {
         // if (!check) {
         //   check = tag.includes('prompt')
         // }
-
-        let check = tag.includes('prompt(')
-
+        let check = /prompt(Date|Interval)*\(/.test(tag)
         return check
       }
 
@@ -1485,7 +1491,7 @@ export default class NPTemplating {
 
     getCodeBlocks(templateData).forEach(async (codeBlock) => {
       if (!codeBlockHasComment(codeBlock) && blockIsJavaScript(codeBlock)) {
-        const executeCodeBlock = codeBlock.replace('```javascript\n', '').replace('```js', '').replace('```\n', '').replace('```', '')
+        const executeCodeBlock = codeBlock.replace('```templatejs\n', '').replace('```\n', '')
         try {
           // $FlowIgnore
           let result = ''

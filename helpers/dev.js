@@ -105,6 +105,10 @@ export function cleanStringifiedResults(str: string): string {
  * @example clo(obj, 'myObj:')
  */
 export function clo(obj: any, preamble: string = '', space: string | number = 2): void {
+  if (!obj) {
+    logDebug(preamble, `null`)
+    return
+  }
   if (typeof obj !== 'object') {
     logDebug(preamble, `${obj}`)
   } else {
@@ -165,7 +169,7 @@ export const getFilteredProps = (object: any): Array<string> => {
  * @param {any} obj
  */
 export function copyObject(obj: any): any {
-  const props = getAllPropertyNames(obj)
+  const props = getFilteredProps(obj)
   return props.reduce((acc, p) => {
     acc[p] = obj[p]
     return acc
@@ -217,6 +221,9 @@ const _message = (message: any): string => {
   return logMessage
 }
 
+const LOG_LEVELS = ['DEBUG', 'INFO', 'WARN', 'ERROR', 'none']
+const LOG_LEVEL_STRINGS = ['| DEBUG |', '| INFO  |', '🥺 WARN🥺', '❗️ERROR❗️', 'none']
+
 /**
  * Formats log output to include timestamp pluginId, pluginVersion
  * @author @codedungeon
@@ -226,8 +233,8 @@ const _message = (message: any): string => {
  * @returns {string}
  */
 export function log(pluginInfo: any, message: any = '', type: string = 'INFO'): string {
-  const LOG_LEVELS = ['DEBUG', 'INFO', 'WARN', 'ERROR', 'none']
   const thisMessageLevel = LOG_LEVELS.indexOf(type)
+  const thisIndicator = LOG_LEVEL_STRINGS[thisMessageLevel]
   let msg = ''
   let pluginId = ''
   let pluginVersion = ''
@@ -237,12 +244,14 @@ export function log(pluginInfo: any, message: any = '', type: string = 'INFO'): 
   if (isPluginJson) {
     pluginId = pluginInfo.hasOwnProperty('plugin.id') ? pluginInfo['plugin.id'] : 'INVALID_PLUGIN_ID'
     pluginVersion = pluginInfo.hasOwnProperty('plugin.version') ? pluginInfo['plugin.version'] : 'INVALID_PLUGIN_VERSION'
-    msg = `${dt().padEnd(19)} | ${type.padEnd(5)} | ${pluginId} v${pluginVersion} :: ${_message(message)}`
+    msg = `${dt().padEnd(19)} ${thisIndicator} ${pluginId} v${pluginVersion} :: ${_message(message)}`
   } else {
     if (message.length > 0) {
-      msg = `${dt().padEnd(19)} | ${type.padEnd(5)} | ${pluginInfo} :: ${_message(message)}`
+      // msg = `${dt().padEnd(19)} | ${thisIndicator.padEnd(7)} | ${pluginInfo} :: ${_message(message)}`
+      msg = `${dt().padEnd(19)} ${thisIndicator} ${pluginInfo} :: ${_message(message)}`
     } else {
-      msg = `${dt().padEnd(19)} | ${type.padEnd(5)} | ${_message(pluginInfo)}`
+      // msg = `${dt().padEnd(19)} | ${thisIndicator.padEnd(7)} | ${_message(pluginInfo)}`
+      msg = `${dt().padEnd(19)} ${thisIndicator} ${_message(pluginInfo)}`
     }
   }
   let userLogLevel = 1
@@ -324,8 +333,9 @@ export function timer(startTime: Date): string {
   const timeStart = startTime ?? new Date()
   const timeEnd = new Date()
   const difference = timeEnd - timeStart
-  const d = new Date(difference)
-  const diffText = `${d.getMinutes()}m${d.getSeconds()}s.${d.getMilliseconds()}ms`
+  // const d = new Date(difference)
+  // const diffText = `${d.getMinutes()}m${d.getSeconds()}.${d.getMilliseconds()}s`
+  const diffText = `${difference.toLocaleString()}ms`
   return diffText
 }
 
@@ -343,7 +353,7 @@ export function timer(startTime: Date): string {
  */
 export function overrideSettingsWithStringArgs(config: any, argsAsString: string): any {
   try {
-    // Parse argsAsJSON (if any) into argObj using assuming JSON
+    // Parse argsAsJSON (if any) into argObj using JSON
     if (argsAsString) {
       const argObj = {}
       argsAsString.split(';').forEach((arg) => (arg.split('=').length === 2 ? (argObj[arg.split('=')[0]] = arg.split('=')[1]) : null))
@@ -352,8 +362,8 @@ export function overrideSettingsWithStringArgs(config: any, argsAsString: string
 
       // Attempt to change arg values that are numerics or booleans to the right types, otherwise they will stay as strings
       for (const key in argObj) {
-        logDebug(`dev.js`, `overrideSettingsWithStringArgs key:${key} value:${argObj[key]} typeof:${typeof argObj[key]} !isNaN(value):${String(!isNaN(argObj[key]))}`)
         let value = argObj[key]
+        logDebug(`dev.js`, `overrideSettingsWithStringArgs key:${key} value:${argObj[key]} typeof:${typeof argObj[key]} !isNaN(${value}):${String(!isNaN(argObj[key]))}`)
         if (!isNaN(value) && value !== '') {
           // Change to number type
           value = Number(value)
@@ -368,7 +378,9 @@ export function overrideSettingsWithStringArgs(config: any, argsAsString: string
           value = value.split(',')
         }
         configOut[key] = value
-        // logDebug('overrideSettingsWithStringArgs', `- updated setting '${key}' -> value '${String(value)}'`)
+        if (configOut[key] !== argObj[key]) {
+          logDebug('overrideSettingsWithStringArgs', `- updated setting '${key}' -> value '${String(value)}'`)
+        }
       }
       return configOut
     } else {

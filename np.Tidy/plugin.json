@@ -1,13 +1,13 @@
 {
   "COMMENT": "Details on these fields: https://help.noteplan.co/article/67-create-command-bar-plugins",
   "macOS.minVersion": "10.13.0",
-  "noteplan.minAppVersion": "3.4.0",
+  "noteplan.minAppVersion": "3.9.11",
   "plugin.id": "np.Tidy",
   "plugin.name": "🧹 Tidy Up",
   "plugin.author": "jgclark",
   "plugin.description": "Tidy up and delete various things in your NotePlan notes",
-  "plugin.version": "0.4.0",
-  "plugin.lastUpdateInfo": "v0.4.0: adds command to tidy up triggers in older calendar notes",
+  "plugin.version": "0.11.0",
+  "plugin.lastUpdateInfo": "v0.11.0: new command '/find doubled notes'.\nv0.10.0: fix bug in moving top level tasks, and adds support for indented tasks.\nv0.9.2: update command aliases.\nv0.9.1: exclude the list-of-stubs note from itself.\nv0.9.0: new '/list stubs' command.\nv0.8.1: fixes.\nv0.8.0: new command: Move top-level tasks in Editor to heading\nv0.7.0: new command: /Remove >today tags from completed todos\nv0.6.0: new commands 'Remove empty notes' 'List conflicted notes' + display improvements.\nv0.5.0: new 'list duplicate notes' command.",
   "plugin.dependencies": [],
   "plugin.script": "script.js",
   "plugin.url": "https://github.com/NotePlan/plugins/blob/main/np.Tidy/README.md",
@@ -18,8 +18,8 @@
       "description": "Run as many of the other commands in this plugin as you have configured.",
       "jsFunction": "tidyUpAll",
       "alias": [
-        "tidy",
-        "tua"
+        "tua",
+        "tidy"
       ]
     },
     {
@@ -27,21 +27,61 @@
       "description": "For each root-level note, asks which folder you'd like it moved to. (There's a setting for ones to ignore.)",
       "jsFunction": "fileRootNotes",
       "alias": [
-        "tidy",
-        "file",
-        "frln"
+        "frln",
+        "tidy"
       ]
     },
     {
-      "name": "Remove orphaned blockIDs",
-      "description": "Remove blockIDs from lines that had been sync'd, but are 'orphans' as the other copies of the blockID have since been deleted.",
-      "jsFunction": "removeOrphanedBlockIDs",
+      "name": "List conflicted notes",
       "alias": [
-        "tidy",
-        "rob"
+        "conflicts"
+      ],
+      "description": "Creates/updates a note that lists all notes on this device that have conflicts. (Requires NP v3.9.3)",
+      "jsFunction": "listConflicts"
+    },
+    {
+      "name": "List duplicate notes",
+      "alias": [
+        "dupes"
+      ],
+      "description": "Creates/updates a note that lists potentially duplicate notes because they have identical titles",
+      "jsFunction": "listDuplicates"
+    },
+    {
+      "name": "List doubled notes",
+      "alias": [
+        "doubles"
+      ],
+      "description": "Creates/updates a note that lists notes that potentially have doubled content (internal duplication)",
+      "jsFunction": "listPotentialDoubles"
+    },
+    {
+      "name": "openCalendarNoteInSplit",
+      "hidden": true,
+      "description": "callback entry point for double-finder",
+      "jsFunction": "openCalendarNoteInSplit",
+      "arguments": [
+        "filename",
+        "point in file for cursor to be moved to"
+      ]
+    },
+    {
+      "name": "List stubs",
+      "description": "Creates/updates a note that lists all your notes that have note links (wikilinks) that lead nowhere",
+      "jsFunction": "listStubs"
+    },
+    {
+      "name": "Move top-level tasks in Editor to heading",
+      "description": "Tasks at top of active note (prior to any heading) will be placed under a specified heading",
+      "jsFunction": "moveTopLevelTasksInEditor",
+      "alias": [
+        "mtth",
+        "Tidy: Move top-level tasks in Editor to heading"
       ],
       "arguments": [
-        "Parameters"
+        "Heading name to place the tasks under (will be created if doesn't exist). If you are running this command in a template, put any non-blank text in the field below.",
+        "Run silently (e.g. in a template). Default is false.",
+        "Return the content of the tasks text, rather than inserting under a heading (e.g. for inserting in a tempate)"
       ]
     },
     {
@@ -49,8 +89,32 @@
       "description": "Remove @done() markers from recently-updated notes. Can be used with parameters from Template or Callback.",
       "jsFunction": "removeDoneMarkers",
       "alias": [
-        "tidy",
-        "rdm"
+        "rdm",
+        "tidy"
+      ],
+      "arguments": [
+        "Parameters"
+      ]
+    },
+    {
+      "name": "Remove blank notes",
+      "description": "Remove notes that are completely empty, or just have a `#` character",
+      "jsFunction": "removeBlankNotes",
+      "alias": [
+        "rbn",
+        "tidy"
+      ],
+      "arguments": [
+        "Parameters"
+      ]
+    },
+    {
+      "name": "Remove orphaned blockIDs",
+      "description": "Remove blockIDs from lines that had been sync'd, but are 'orphans' as the other copies of the blockID have since been deleted.",
+      "jsFunction": "removeOrphanedBlockIDs",
+      "alias": [
+        "rob",
+        "tidy"
       ],
       "arguments": [
         "Parameters"
@@ -61,8 +125,8 @@
       "description": "Remove time parts of @done(date time) from recently-updated notes. Can be used with parameters from Template or Callback.",
       "jsFunction": "removeDoneTimeParts",
       "alias": [
-        "tidy",
-        "rtp"
+        "rtp",
+        "tidy"
       ],
       "arguments": [
         "Parameters"
@@ -73,8 +137,8 @@
       "description": "Remove a given section (both the heading and its content) from recently-changed notes.\nCan be used with parameters from Template or x-callback.",
       "jsFunction": "removeSectionFromRecentNotes",
       "alias": [
-        "tidy",
-        "rsfn"
+        "rsrn",
+        "tidy"
       ],
       "arguments": [
         "Parameters"
@@ -85,11 +149,20 @@
       "description": "Remove a given section (both the heading and its content) from all notes.\nCan be used with parameters from Template or x-callback.",
       "jsFunction": "removeSectionFromAllNotes",
       "alias": [
-        "tidy",
-        "rcuh"
+        "rsan",
+        "tidy"
       ],
       "arguments": [
         "Parameters"
+      ]
+    },
+    {
+      "name": "Remove >today tags from completed todos",
+      "description": "Remove Completed todos that have a >today tag. Can be used with parameters from Template or Callback.",
+      "jsFunction": "removeTodayTagsFromCompletedTodos",
+      "alias": [
+        "rmt",
+        "removeToday"
       ]
     },
     {
@@ -97,24 +170,41 @@
       "description": "Remove one or more triggers from recent (but past) calendar notes.\nCan be used with parameters from Template or x-callback.",
       "jsFunction": "removeTriggersFromRecentCalendarNotes",
       "alias": [
-        "tidy",
-        "rtcn"
+        "rtcn",
+        "tidy"
       ],
       "arguments": [
         "Parameters"
       ]
     },
     {
-      "name": "Log notes changed in interval (Tidy)",
-      "description": "Write a list of Log notes changed in the last interval of days to the plugin log. It will default to the 'Default Recent Time Interval' setting unless passed as a parameter.",
+      "name": "resolveConflictWithCurrentVersion",
+      "hidden": true,
+      "description": "x-callback entry for resolveConflictWithCurrentVersion",
+      "jsFunction": "resolveConflictWithCurrentVersion"
+    },
+    {
+      "name": "resolveConflictWithOtherVersion",
+      "hidden": true,
+      "description": "x-callback entry for resolveConflictWithOtherVersion",
+      "jsFunction": "resolveConflictWithOtherVersion"
+    },
+    {
+      "name": "Log notes changed in interval",
+      "description": "Write a list of notes changed in the last interval of days to the plugin console log. It will default to the 'Default Recent Time Interval' setting unless passed as a parameter.",
       "jsFunction": "logNotesChangedInInterval",
       "alias": [
-        "tidy",
-        "lncii"
+        "lncii",
+        "tidy"
       ],
       "arguments": [
         "Parameters"
       ]
+    },
+    {
+      "name": "Update plugin settings",
+      "description": "Settings interface (even for iOS)",
+      "jsFunction": "updateSettings"
     }
   ],
   "plugin.commands_disabled": [
@@ -134,6 +224,73 @@
   "plugin.settings": [
     {
       "type": "heading",
+      "title": "'/File root-level notes' command settings"
+    },
+    {
+      "title": "Which root notes to ignore?",
+      "key": "rootNotesToIgnore",
+      "description": "Comma-separated list of note titles that you need or want to leave in the root folder. These will be ignored when running the command.\nNote: the '# ' is not part of the title, so don't include it.",
+      "type": "[string]",
+      "default": [],
+      "required": false
+    },
+    {
+      "type": "separator"
+    },
+    {
+      "type": "heading",
+      "title": "'/List ... commands settings"
+    },
+    {
+      "key": "listFoldersToExclude",
+      "title": "Folders to exclude for /List ... commands",
+      "description": "List of folders to ignore in the '/List ...' commands. May be empty.",
+      "type": "[string]",
+      "default": [
+        "Saved Searches",
+        "@Templates",
+        "@Archive",
+        "@Trash"
+      ],
+      "required": false
+    },
+    {
+      "key": "conflictedNoteFilename",
+      "title": "/List conflicted notes: Filepath for results note",
+      "description": "The filepath (including any NP folders) of which NotePlan note to use. (Default: 'Conflicted Notes.md')",
+      "type": "string",
+      "default": "Conflicted Notes.md",
+      "required": true
+    },
+    {
+      "key": "duplicateNoteFilename",
+      "title": "/List duplicate notes: Filepath for results",
+      "description": "The filepath (including any NP folders) of which NotePlan note to use. (Default: 'Duplicate Notes.md')",
+      "type": "string",
+      "default": "Duplicate Notes.md",
+      "required": true
+    },
+    {
+      "key": "doubledNoteFilename",
+      "title": "/List doubled notes: Filepath for results",
+      "description": "The filepath (including any NP folders) of which NotePlan note to use. (Default: 'Possible Doubled Notes.md')",
+      "type": "string",
+      "default": "Possible Doubled Notes.md",
+      "required": true
+    },
+    {
+      "key": "stubsNoteFilename",
+      "title": "/List stubs: filepath for results note",
+      "description": "The filepath (including any NP folders) of which NotePlan note to use. (Default: 'Stubs.md')",
+      "type": "string",
+      "default": "Stubs.md",
+      "required": true
+    },
+    {
+      "type": "separator"
+    },
+    {
+      "type": "heading",
       "title": "'/Remove ... from recent ...' command settings"
     },
     {
@@ -145,7 +302,7 @@
       "required": false
     },
     {
-      "key": "foldersToExclude",
+      "key": "removeFoldersToExclude",
       "title": "Folders to exclude",
       "description": "List of folders to exclude in the '/Remove ...' commands. May be empty.",
       "type": "[string]",
@@ -183,14 +340,14 @@
     },
     {
       "type": "heading",
-      "title": "'/File root-level notes' command settings"
+      "title": "'/Move top-level tasks in Editor...' command settings"
     },
     {
-      "title": "Which notes to ignore?",
-      "key": "rootNotesToIgnore",
-      "description": "Comma-separated list of note titles that you need or want to leave in the root folder. These will be ignored when running the command.\nNote: the '# ' is not part of the title, so don't include it.",
-      "type": "[string]",
-      "default": [],
+      "title": "Heading name for '/Move top-level tasks in Editor to heading' command",
+      "key": "moveTopLevelTasksHeading",
+      "description": "When \"/Move top-level tasks in Editor to heading\" is run, this is the name of the heading to move the tasks under. If the heading doesn't exist in the current Editor note, it will be created.\nNOTE: If you leave this blank, you will be prompted for the heading to move the tasks under at run-time.",
+      "type": "string",
+      "default": "Tasks",
       "required": false
     },
     {
@@ -209,9 +366,33 @@
       "required": true
     },
     {
+      "title": "Run '/List conflicted notes' command?",
+      "key": "runConflictFinderCommand",
+      "description": "",
+      "type": "bool",
+      "default": false,
+      "required": true
+    },
+    {
+      "title": "Run '/List duplicate notes' command?",
+      "key": "runDuplicateFinderCommand",
+      "description": "",
+      "type": "bool",
+      "default": false,
+      "required": true
+    },
+    {
+      "title": "Run '/Remove blank notes' command?",
+      "key": "runRemoveBlankNotes",
+      "description": "",
+      "type": "bool",
+      "default": false,
+      "required": true
+    },
+    {
       "title": "Run '/Remove orphaned blockIDs' command?",
       "key": "runRemoveOrphansCommand",
-      "ddescription": "",
+      "description": "",
       "type": "bool",
       "default": false,
       "required": true
@@ -219,7 +400,7 @@
     {
       "title": "Run '/Remove @done() markers' command?",
       "key": "runRemoveDoneMarkersCommand",
-      "ddescription": "",
+      "description": "",
       "type": "bool",
       "default": false,
       "required": true
@@ -227,7 +408,15 @@
     {
       "title": "Run '/Remove time parts from @done() dates' command?",
       "key": "runRemoveDoneTimePartsCommand",
-      "ddescription": "",
+      "description": "",
+      "type": "bool",
+      "default": false,
+      "required": true
+    },
+    {
+      "title": "Run '/Remove >today tags from completed todos?",
+      "key": "removeTodayTagsFromCompletedTodos",
+      "description": "",
       "type": "bool",
       "default": false,
       "required": true
@@ -235,10 +424,23 @@
     {
       "title": "Run '/Remove triggers from recent calendar notes?",
       "key": "removeTriggersFromRecentCalendarNotes",
-      "ddescription": "",
+      "description": "",
       "type": "bool",
       "default": false,
       "required": true
+    },
+    {
+      "title": "Run '/Move top-level tasks in Editor to heading?",
+      "key": "moveTopLevelTasksInEditor",
+      "description": "Note: this command does not work like the other commands inside a template (e.g. your daily template). See plugin README for how to run this command in a daily template.",
+      "type": "bool",
+      "default": false,
+      "required": true,
+      "arguments": [
+        "Heading name to place the tasks under (will be created if doesn't exist). If you are running this command in a template, put any non-blank text in the field below.",
+        "Run silently (e.g. in a template). Default is false.",
+        "Return the content of the tasks text, rather than inserting under a heading (e.g. for saving to a variable and inserting into a template). This must be true if running from a template."
+      ]
     },
     {
       "type": "separator"

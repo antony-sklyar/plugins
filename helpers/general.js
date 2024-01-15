@@ -4,8 +4,7 @@
 //-------------------------------------------------------------------------------
 
 import json5 from 'json5'
-import { logError, logDebug, JSP } from './dev'
-import { showMessage } from './userInput'
+import { clo, JSP, logError, logDebug } from './dev'
 import { getDateStringFromCalendarFilename } from './dateTime'
 
 export type headingLevelType = 1 | 2 | 3 | 4 | 5
@@ -21,7 +20,7 @@ export type headingLevelType = 1 | 2 | 3 | 4 | 5
  */
 export class CaseInsensitiveMap<TVal> extends Map<string, TVal> {
   // This is how private keys work in actual Javascript now.
-  #keysMap = new Map<string, string>()
+  #keysMap: Map<string, string> = new Map<string, string>()
 
   constructor(iterable?: Iterable<[string, TVal]>) {
     super()
@@ -96,9 +95,8 @@ export async function parseJSON5(contents: string): Promise<?{ [string]: ?mixed 
   try {
     const value = json5.parse(contents)
     return (value: any)
-  } catch (e) {
-    logError('general/parseJSON5()', e)
-    await showMessage('Invalid data found when parsing JSON5 data.')
+  } catch (err) {
+    logError('general/parseJSON5()', err.message)
     return {}
   }
 }
@@ -329,11 +327,11 @@ export function createPrettyOpenNoteLink(linkText: string, titleOrFilename: stri
  * @param {string} linkText - the text to display for the link
  * @param {string} pluginID - the plugin's ID
  * @param {boolean} command - the "name" field of the plugin command to run
- * @param {Array<string> | string} args - heading inside of note (optional)
+ * @param {any} args - arguments to pass (optional)
  * @returns {string} arguments as strings (or single argument string) to send through to plugin
  * @tests available
  */
-export function createPrettyRunPluginLink(linkText: string, pluginID: string, command: string, args: Array<string> | string): string {
+export function createPrettyRunPluginLink(linkText: string, pluginID: string, command: string, args: any): string {
   return `[${linkText}](${createRunPluginCallbackUrl(pluginID, command, args)})`
 }
 
@@ -389,30 +387,39 @@ export function stringReplace(inputString: string = '', replacementArray: Array<
 }
 
 /**
- * Get a particular parameter setting from parameter string
+ * Get a particular parameter setting from a JSON5 parameter string
  * (Replaces an earlier version called getTagParams)
  * @author @dwertheimer
  *
- * @param {string} paramString - the contents of the template tag, e.g. {{weather(template:FOO)}}
+ * @param {string} paramString - the contents of the template tag as a JSON5 string (e.g. either '{"template":"FOO", "area":"BAR"}' or '{template:"FOO", area:"BAR"}')
  * @param {string} wantedParam - the name of the parameter to get (e.g. 'template')
  * @param {any} defaultValue - default value to use if parameter not found
  * @returns {any} the value of the desired parameter if found (e.g. 'FOO'), or defaultValue if it isn't
  */
-export async function getTagParamsFromString(paramString: string, wantedParam: string, defaultValue: any): any {
-  // log('general/getTagParamsFromString', `for '${wantedParam}' in '${paramString}'`)
-  if (paramString !== '' && wantedParam !== '') {
-    try {
-      // $FlowFixMe(incompatible-type)
-      const paramObj: {} = await json5.parse(paramString)
-      const output = paramObj.hasOwnProperty(wantedParam) ? paramObj[wantedParam] : defaultValue
-      // log('general/getTagParamsFromString', `--> ${output}`)
-      return output
-    } catch (e) {
-      logError('general/getTagParamsFromString', `Can't parse ${paramString} ${e}`)
+export async function getTagParamsFromString(paramString: string, wantedParam: string, defaultValue: any): Promise<any> {
+  try {
+    // logDebug('general/getTagParamsFromString', `for '${wantedParam}' in '${paramString}'`)
+    if (wantedParam === '') {
+      throw new Error("Can't look for empty wantedParam")
     }
+    if (paramString === '') {
+      logDebug('general/getTagParamsFromString', `Empty paramString, so returning defaultValue`)
+      return defaultValue
+    }
+    // $FlowIgnore(incompatible-type) as can produce 'any'
+    const paramObj: {} = await json5.parse(paramString)
+    // console.log(typeof paramObj)
+    if (typeof paramObj !== 'object') {
+      throw new Error('JSON5 parsing did not return an object')
+    }
+    // clo(paramObj)
+    const output = paramObj.hasOwnProperty(wantedParam) ? paramObj[wantedParam] : defaultValue
+    // logDebug('general/getTagParamsFromString', `--> ${output}`)
+    return output
+  } catch (e) {
+    logError('general/getTagParamsFromString', `${e}. paramString="${paramString}". wantedParam="${wantedParam}" defaultValue="${defaultValue}". Returning an error string.`)
+    return '❗️error'
   }
-  // log('general/getTagParamsFromString', `--> ${defaultValue} (default)`)
-  return defaultValue
 }
 
 /**
@@ -451,9 +458,9 @@ export function semverVersionToNumber(version: string): number {
     }
   }
 
-  for (let part of parts) {
-    part = parseInt(part, 10)
-    if (Number.isNaN(part) || part >= 1024) {
+  for (const part of parts) {
+    const foundPart: number = parseInt(part, 10)
+    if (Number.isNaN(foundPart) || foundPart >= 1024) {
       throw new Error(`Version string invalid, ${part} is too large`)
     }
   }

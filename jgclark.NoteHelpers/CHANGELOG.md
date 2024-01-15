@@ -2,6 +2,42 @@
 For more details see the [plugin's README](https://github.com/NotePlan/plugins/tree/main/jgclark.NoteHelpers/).
 <!-- ### Added
 <!-- TODO: Decide whether to shift "/add number of days to dates" to a different plugin -->
+## [0.19.0] - 2024-01-09
+- moved the "open note in ..." commands to the new "Window Tools" plugin
+- updated the display of the "index folders" command to use heading levels H2 to H4 depending on how deep the sub-folder is. The placeholder in the title `{{folder}}` now just uses the last part of the folder name, or new placeholder `{{full_folder_path}}` which will use the folder's full path. (Requested by @dutchnesss).
+- removed 'Show month/quarter/year' commands as they are now in the main NP menus.
+- fix to '/rename inconsistent filename' command (reported by @anton-sklyar)
+- fix to '/make index' command ignoring parameter 'displayOrder' if given.
+
+## [0.18.2] - 2023-09-18
+- fix edge case with /add trigger command.
+
+## [0.18.1] - 2023-08-15
+- New commands by @Leo:
+  - "/list inconsistent note filenames": lists the names of notes whose filenames are inconsistent with their titles
+  - "/rename filename to title": renames the current filename to the title of the note
+- when the command bar shows list of notes to choose, it now includes Template files again.
+
+## [0.18.0] - 2023-08-13
+- new command **Show This Month** (alias /stm)
+- new command **Show This Quarter** (alias /stq)
+- new command **Show This Year** (alias /sty) (requested by @danieldanilov)
+- new command **update all indexes** that updates all the existing folder index notes
+- added more decoration to most-used calendar dates, when showing them in lists of notes (e.g. in "jump to note's heading" and "open note new window").
+
+## [0.17.3] - 2023-07-01
+- added new setting 'Title to use for index notes' for "/index folders" command (requested by @dwertheimer)
+- layout improvements and further bug fix  in "/index folders" (spotted by @dwertheimer)
+
+## [0.17.2] - 2023-06-30
+### Fixed
+- fix bug in **/index folders** (spotted by @dwertheimer)
+
+## [0.17.0] - 2023-06-12
+### Added
+- new **/open url from a note** command that asks user for a note, and then presents a list of URLs. The selected one is then opened in your default browser. (for @John1 with help from @dwertheimer)
+- now **/move note** and **/index folders** commands offer option to create a new folder when selecting a folder (suggested by @dwertheimer)
+- new **/reset caches** command that just runs the command of that name in the NotePlan Help menu (for @clayrussell)
 
 ## [0.16.1] - 2023-03-22
 ### Added
@@ -55,7 +91,7 @@ For more details see the [plugin's README](https://github.com/NotePlan/plugins/t
 ## [0.10.0..0.10.6] - 2021-11-17
 ### Added
 - added **/onw** command to open a user-selected note in a new window.
-- added **/index** command to make/update note link Indexes for one or more folders 
+- added **/index** command to make/update note link Indexes for one or more folders
 ### Changed
 - updated the 'jumping' commands /jh and /jd work better with API change
 - now 'move' or 'jump' to daily notes, not just project notes
@@ -85,27 +121,27 @@ For more details see the [plugin's README](https://github.com/NotePlan/plugins/t
 ## [0.7.0..0.7.2] - 2021-05-22
 - Updated applyTemplate() and newNote() so that they pick a template from a folder. This '📋 Templates' folder - along with sample templates - will be created if non-existing.
 - change to using two-letter command names, to match new style agreed with EM
-- move the **show statistics** command to a separate statistics plugin
+- move the **/show statistics** command to a separate statistics plugin
 - add option to copy to clipboard statistics summary
 
 ## [0.6.1] - 2021-05-14
 ### Added
-- add the **jump to Done** command
+- add the **/jump to Done** command
 - add option to copy to clipboard statistics summary
 
 ## [0.5.0] - 2021-05-08
 ### Added
-- moved the example plugin **move Note** command to this plugin
+- moved the example plugin **/move Note** command to this plugin
 
 ## [0.4.0] - 2021-05-07
 ### Added
-- added multiple templates to **newNote**
-- added **applyTemplate** command
+- added multiple templates to **/newNote**
+- added **/applyTemplate** command
 
 ## [0.3.0..0.3.2]
 ### Added
 - show statistics output on the command bar as well
-- added **statistics**: for now this only writes to the console log (open from the Help menu)
- 
+- added **/statistics**: for now this only writes to the console log (open from the Help menu)
+
 ## [0.2.0]
-- added **newNote** command
+- added **/newNote** command

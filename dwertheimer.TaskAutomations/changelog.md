@@ -5,6 +5,39 @@
 
 ## What's Changed in this Plugin?
 
+## [2.18.0] @dwertheimer 2023-12-?? 
+
+- Started saving most frequently used choices in prefs for future potential use in commandbar options sorting per user
+- Refactored much of the overdue processing under the hood to make it more modular and testable for the future
+- Bug fixes under the hood
+
+## [2.17.0] @dwertheimer 2023-08-29
+
+- Overdue processing: change edit to allow you to opt-click a date return you to edit
+- Overdue processing: added p1,p2,p3 options. Thx @george!
+
+## [2.16.0] @dwertheimer 2023-08-23
+
+- Overdue processing: Add move-to-note as list/checklist option
+
+## [2.15.0] @dwertheimer 2023-06-10
+
+- Removed URL opening commands and moved them to Link Creator
+
+## [2.14.5] @dwertheimer 2023-05-23
+
+- Change order of interactive task review (look for forgotten tasks before week/today)
+
+## [2.14.4] @dwertheimer 2023-05-10
+
+- Improve handling of scheduling overdue tasks for future (e.g. tomorrow):
+  - "Review tasks for Today?" was still using *today*, changed it to correctly use whatever day you have been reviewing
+  - Same for review for this week
+
+## [2.14.3] @dwertheimer 2023-04-25
+
+- Fix bug that was overlooking forgotten tasks without dates.
+
 ## [2.14.2]
 
 - XCallback bug fix
@@ -38,7 +71,7 @@
 
 - Fix filter dropdown bug 2023-04-08
 
-## [2.12.2] @dwertheimer 
+## [2.12.2] @dwertheimer
 
 - Document xcallbacks for React view
 
@@ -52,7 +85,7 @@
 
 ## [2.11.4] (@dwertheimer) 2023-03-26
 
-- roll back scheduled types per https://discord.com/channels/763107030223290449/1015086466663202856/1089721078957473813
+- roll back scheduled types per <https://discord.com/channels/763107030223290449/1015086466663202856/1089721078957473813>
 
 ## [2.11.3] (@dwertheimer) 2023-03-26
 

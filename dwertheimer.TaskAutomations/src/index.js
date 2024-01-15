@@ -27,7 +27,6 @@ export { taskSync } from './taskSync'
 export { copyTagsFromLineAbove, copyTagsFromHeadingAbove, copyLineForEachMention, copyLineForEachHashtag } from './tagTasks'
 export {
   updateDatePlusTags,
-  reviewOverdueTasksByNote,
   reviewOverdueTasksByTask,
   reviewOverdueTasksInNote,
   reviewOverdueTasksInFolder,
@@ -37,7 +36,6 @@ export {
   reviewWeeklyTasks,
   reviewOverdueTasksAsOfDate,
 } from './NPOverdue'
-export { openIncompleteLinksInNote, openURLOnLine } from './NPOpenLinks'
 export { followUpSaveHere, followUpInFuture } from './NPFollowUp'
 export { processOverdueReact, onUserModifiedParagraphs, testOverdueReact, processFolderReact } from './NPOverdueReact.js'
 

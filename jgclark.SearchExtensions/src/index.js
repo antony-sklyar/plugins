@@ -2,7 +2,7 @@
 //-----------------------------------------------------------------------------
 // More advanced searching
 // Jonathan Clark
-// Last updated 25.10.2022 for v1.0.0-beta
+// Last updated 7.12.2023 for v1.3.0
 //-----------------------------------------------------------------------------
 
 export {
@@ -14,13 +14,22 @@ export {
   searchOverCalendar
 } from './saveSearch'
 export { searchPeriod } from './saveSearchPeriod'
+export { refreshSavedSearch } from './searchTriggers'
+export {
+  closeDialogWindow,
+  flexiSearchRequest,
+  flexiSearchHandler,
+  getPluginPreference,
+  savePluginPreference
+} from './flexiSearch'
 
 const pluginID = "jgclark.SearchExtensions"
 
 // allow changes in plugin.json to trigger recompilation
 import pluginJson from '../plugin.json'
+import { JSP, logDebug, logError, logInfo } from '@helpers/dev'
 import { pluginUpdated, updateSettingData } from '@helpers/NPConfiguration'
-import { JSP, logError, logInfo } from '@helpers/dev'
+import { editSettings } from '@helpers/NPSettings'
 
 export function init(): void {
   try {
@@ -51,4 +60,18 @@ export async function onUpdateOrInstall(): Promise<void> {
     logError(pluginID, error.message)
   }
   logInfo(pluginID, `- finished`)
+}
+
+/**
+ * Update Settings/Preferences (for iOS etc)
+ * Plugin entrypoint for command: "/<plugin>: Update Plugin Settings/Preferences"
+ * @author @dwertheimer
+ */
+export async function updateSettings() {
+  try {
+    logDebug(pluginJson, `updateSettings running`)
+    await editSettings(pluginJson)
+  } catch (error) {
+    logError(pluginJson, JSP(error))
+  }
 }

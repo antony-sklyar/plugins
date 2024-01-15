@@ -3,20 +3,24 @@
 // ----------------------------------------------------------------------------
 // Dashboard plugin for NotePlan
 // Jonathan Clark
-// last updated 22.3.2023 for v0.3.2, @jgclark
+// last updated 26.12.2023 for v0.7.5, @jgclark
 // ----------------------------------------------------------------------------
 
 // allow changes in plugin.json to trigger recompilation
 import pluginJson from '../plugin.json'
-import { JSP, logDebug, logError, logInfo, logWarn } from '@helpers/dev'
+import { showDashboardHTML } from './main'
+import { clo, JSP, logDebug, logError, logInfo, logWarn } from '@helpers/dev'
 import { getPluginJson, pluginUpdated, updateSettingData } from '@helpers/NPConfiguration'
 import { editSettings } from '@helpers/NPSettings'
+import { isHTMLWindowOpen, logWindowsList } from '@helpers/NPWindows'
 import { showMessage } from '@helpers/userInput'
 
-export { logWindowsList } from '@helpers/NPWindows'
+// import { getNPWeekData } from '@helpers/NPdateTime'
+import { getDateStringFromCalendarFilename } from '@helpers/dateTime'
+import moment from 'moment/min/moment-with-locales'
 
 export { getDemoDataForDashboard } from './demoDashboard'
-export { showDashboardHTML, showDemoDashboardHTML } from './dashboardHTML'
+export { addTask, addChecklist, refreshDashboard, showDashboardHTML, showDemoDashboardHTML, resetDashboardWinSize } from './main'
 export { decideWhetherToUpdateDashboard } from './dashboardTriggers'
 export { onMessageFromHTMLView } from './pluginToHTMLBridge'
 export { getDataForDashboard, logDashboardData } from './dataGeneration'
@@ -29,23 +33,30 @@ const thisPluginID = 'jgclark.Dashboard'
 export async function init(): Promise<void> {
   try {
     // Check for the latest version of the plugin, and if a minor update is available, install it and show a message
-    // Note: turned off, as it was causing too much noise in logs
-    // DataStore.installOrUpdatePluginsByID([pluginJson['plugin.id']], false, false, false).then((r) =>
-    //   pluginUpdated(pluginJson, r),
-    // )
+    DataStore.installOrUpdatePluginsByID([pluginJson['plugin.id']], false, false, false)
   } catch (error) {
     logError(`${thisPluginID}/init`, JSP(error))
   }
 }
 
-export function onSettingsUpdated(): void {
-  // Placeholder only to stop error in logs
+export async function onSettingsUpdated(): Promise<any> {
+  // TODO: Remove this temporary alternative
+  const today = new moment().toDate()
+  const currentWeeklyNote = DataStore.calendarNoteByDate(today, 'week')
+  const thisFilename = currentWeeklyNote?.filename ?? '(error)'
+  const dateStr = getDateStringFromCalendarFilename(thisFilename)
+  logDebug('test', `currentWeeklyNote: ${thisFilename}`)
+  logDebug('test', `dateStr: ${dateStr}`)
+
+  // if (!isHTMLWindowOpen(pluginJson['plugin.id'])) {
+  //   await showDashboardHTML('refresh', false) // don't need await in the case I think
+  // }
 }
 
 export async function onUpdateOrInstall(): Promise<void> {
   try {
     // Tell user the plugin has been updated
-    if (pluginJson['plugin.lastUpdateInfo'] !== 'undefined') {
+    if (pluginJson['plugin.lastUpdateInfo'] !== undefined) {
       await showMessage(pluginJson['plugin.lastUpdateInfo'], 'OK, thanks', `Plugin ${pluginJson['plugin.name']}\nupdated to v${pluginJson['plugin.version']}`)
     }
   } catch (error) {
@@ -61,7 +72,7 @@ export async function onUpdateOrInstall(): Promise<void> {
 export async function updateSettings() {
   try {
     logDebug(pluginJson, `updateSettings running`)
-    await editSettings(pluginJson)
+    const res = await editSettings(pluginJson)
   } catch (error) {
     logError(pluginJson, JSP(error))
   }

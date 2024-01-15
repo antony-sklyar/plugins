@@ -1,11 +1,53 @@
 # What's Changed in ⏱ Habits and Summaries plugin?
 (And see the full [README](https://github.com/NotePlan/plugins/tree/main/jgclark.Summaries).)
 
+<!-- - ??? make below work with all options -->
+
+## [0.20.2] - 2023-12-30
+- added x-callback options for /periodStats command. See documentation for details.
+
+## [0.20.1] - 2023-11-10
+- fix Refresh button not working after '/append progress update' command
+- turns down logging against an API error
+
+## [0.20.0] - 2023-10-12
+### Added
+- new **today progress** command that summarises tags or mentions _within today's note_. This could be useful for summarising `@calories(...)` noted from different meals, for example. This can also be invoked by an x-callback call, and through template calls. (For @seanokana)
+- new **heatmap for tag** command that displays a 'heatmap' chart of a chosen tag's values for each day (e.g. all `@work(...)` values from daily notes)
+- new **Habits+Summaries:update plugin settings** command, that allows settings to be changed on iOS/iPadOS.
+
+## [0.19.4] - 2023-09-26 unreleased
+### Added
+- Refresh button to output of **periodStats** command, where the time period is "<period> to date"
+## [0.19.3] - 2023-08-06
+### Fixed
+- date logic on 'weeklyStatsToCSV' command output
+
+## [0.19.2] - 2023-07-28
+### Fixed
+- date logic when selecting 'other month' for stats (thanks to tip by @chrismalek)
+
+## [0.19.1] - 2023-05-15
+### Added
+- new settings '#hashtags to average' and '#hashtags to total' alongside existing '#hashtags to count' setting for **periodStats** command
+- new setting 'Include sparkline graphs?' that now applies separately to the 'periodStats' command
+### Changed
+- the 'periodStats' command will attempt not to open another copy of the output note in another split view, if that output note is already open
+### Fixed
+- regression in last release with /periodStats
+
+## [0.19.0] - 2023-05-14
+### Added
+- new settings '#hashtags to average' and '#hashtags to total' alongside existing '#hashtags to count' setting for **appendProgressUpdate** command.
+### Changed
+- increased the number of significant figures shown in Progress Summary 'average' outputs (for @chrismalek, #443)
+- code tidy up
+
 ## [0.18.0] - 2023-03-21
 ### New
-- Added new '@mentions to average' and '@mentions to total' alongside existing '@mentions to count' setting for /periodStats. These tailor the output to focus on just the average or total, rather than all the currently-presented statistics (count, total and average). (These now match what is already possible with /insertProgressUpdate.)
+- Added new '@mentions to average' and '@mentions to total' alongside existing '@mentions to count' setting for **periodStats** command. These tailor the output to focus on just the average or total, rather than all the currently-presented statistics (count, total and average). (These now match what is already possible with /insertProgressUpdate.)
 ### Changed
-- changed name of user command /insertProgressUpdate to /appendProgressUpdate to better reflect how it works. (The earlier name still works, and it also doesn't require changing any existing templates or x-callback calls.)
+- changed name of user command **insertProgressUpdate** to **appendProgressUpdate** to better reflect how it works. (The earlier name still works, and it also doesn't require changing any existing templates or x-callback calls.)
 
 ### Fixed
 - 'Exclude today?' setting being ignored
@@ -13,11 +55,11 @@
 
 ## [0.17.3] - 2023-01-19
 ### Fixed
-- fix edge case of malformed @mentions in /insertProgressUpdate calls
+- fix edge case of malformed @mentions in "insertProgressUpdate" calls
 
 ## [0.17.2] - 2023-01-03
 ### Fixed
-- end-of-year bug in dates for /periodStats for "last month" option.
+- end-of-year bug in dates for "periodStats" for "last month" option.
 
 ## [0.17.1] - 2022-11-27
 ### Fixed
@@ -25,7 +67,7 @@
 
 ## [0.17.0] - 2022-11-25
 ### Added
-- will write **/periodStats** summaries to the new monthly/quarterly/yearly notes (available from NP v3.7.2) as well as the existing folder you can set in the settings.
+- will write **periodStats** summaries to the new monthly/quarterly/yearly notes (available from NP v3.7.2) as well as the existing folder you can set in the settings.
 
 ## [0.16.1] - 2022-11-17
 ### Fixed
@@ -80,7 +122,7 @@
 - the **/insertProgressUpdate** command, and its template equivalent, now also supports 'last7d', 'last2w', 'last4w' as options for the 'period' parameter (for @george65)
 - the **/periodStats** command now includes sparklines for periods up to a month, if you request them.
 ### Changed
-- in the /periodStats command the '@mentions to exclude' and '#hashtags to exclude' settings have now been removed, as I don't think they're useful any more, and make the code much harder to extend. If you're affected by this please get in touch -- the details at the end of the README. 
+- in the /periodStats command the '@mentions to exclude' and '#hashtags to exclude' settings have now been removed, as I don't think they're useful any more, and make the code much harder to extend. If you're affected by this please get in touch -- the details at the end of the README.
 
 ## [0.12.0] - 2022-08-14
 ### Added

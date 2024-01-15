@@ -3,12 +3,13 @@
 // Paragraph and block-level helpers functions
 //-----------------------------------------------------------------------------
 
+import { getDateStringFromCalendarFilename } from './dateTime'
 import { clo, logDebug, logError, logWarn } from './dev'
 import {
-  RE_SIMPLE_URI_MATCH,
   RE_MARKDOWN_LINK_PATH_CAPTURE,
+  RE_NOTELINK_G,
+  RE_SIMPLE_URI_MATCH,
 } from '@helpers/regex'
-import { getLineMainContentPos } from '@helpers/search'
 import { stripLinksFromString } from '@helpers/stringTransforms'
 
 //-----------------------------------------------------------------------------
@@ -40,6 +41,45 @@ export function isTermInURL(term: string, searchString: string): boolean {
 
   // logDebug('isTermInURL', `looking for ${term} in ${searchString} ${String(caseInsensitiveSubstringMatch(term, searchStringWithoutURL))} / ${searchStringWithoutURL} ${String(RE_SIMPLE_URI_MATCH.test(searchStringWithoutURL))} -> ${String(success)}`)
   return success
+}
+
+/**
+ * Is 'term' (typically a #tag) found in [[...]] or a URL in a string which may contain 0 or more notelinks and URLs?
+ * @tests are in a commented-out function in jest file
+ * @param {string} input
+ * @param {string} term
+ * @returns {boolean} true if found
+ */
+export function isTermInNotelinkOrURI(input: string, term: string): boolean {
+  if (term === '') {
+    logWarn(`isTermInNotelinkOrURI`, `empty search term`)
+    return false
+  }
+  if (input === '') {
+    logWarn(`isTermInNotelinkOrURI`, `empty input string to search`)
+    return false
+  }
+  // Where is the term in the input?
+  const index = input.indexOf(term)
+  if (index < 0) {
+    // logDebug(`isTermInNotelinkOrURI`, `term ${term} not found in'${input}'`)
+    return false
+  }
+  // Find any [[...]] ranges
+  const matches = input.matchAll(RE_NOTELINK_G)
+  if (matches) {
+    for (const match of matches) {
+      clo(match)
+      const rangeStart = match.index
+      const rangeEnd = match.index + match[0].length
+      // logDebug(`isTermInNotelinkOrURI`, `[[...]] range: ${String(rangeStart)}-${String(rangeEnd)}`)
+      if (index >= rangeStart && index <= rangeEnd) {
+        return true
+      }
+    }
+  }
+  // Check for URL ranges. Following isn't perfect, but close enough for URLs on their own or in a [markdown](link).
+  return isTermInURL(term, input)
 }
 
 /**
@@ -84,6 +124,18 @@ export function rangeToString(r: TRange): string {
 }
 
 /**
+ * Pretty print range information
+ * Note: This is a copy of what's in general.js to avoid circular dependency.
+ * @author @EduardMe
+ */
+export function contentRangeToString(content: string, r: TRange): string {
+  if (r == null) {
+    return 'Range is undefined!'
+  }
+  return `${content.slice(r.start, r.end + 1)} [${r.start}-${r.end}]`
+}
+
+/**
  * Return title of note useful for display, including for
  * - daily calendar notes (the YYYYMMDD)
  * - weekly notes (the YYYY-Wnn)
@@ -95,10 +147,10 @@ export function rangeToString(r: TRange): string {
  */
 export function displayTitle(n: ?CoreNoteFields): string {
   return !n
-    ? 'error'
-    : n.type === 'Calendar' && ((n: $FlowFixMe): TNote).date != null
-      ? n.filename.split('.')[0] // without file extension
-      : n.title ?? ''
+    ? '(error)'
+    : n.type === 'Calendar'
+      ? getDateStringFromCalendarFilename(n.filename) ?? '' // earlier: return n.filename.split('.')[0] // without file extension
+      : n.title ?? '(error)'
 }
 
 /**
@@ -153,65 +205,6 @@ export function printParagraph(p: TParagraph) {
 }
 
 /**
- * WARNING: use findStartOfActivePartOfNote() instead
- * Works out which line to insert at top of file. Rather than just after title line,
- * go after any YAML frontmatter or a metadata line (= starts with a hashtag).
- * TODO: How is this really different from findStartOfActivePartOfNote() ?
- * @author @jgclark
- * @tests in jest file
- * @param {TNote} note - the note of interest
- * @returns {number} line - the calculated line to insert/prepend at
- */
-// export function calcSmartPrependPoint(note: TNote): number {
-//   const lines = note.paragraphs.map((s) => s.content)
-//   // logDebug('paragraph/calcSmartPrependPoint', `Starting with ${lines.length} lines`)
-
-//   // By default we prepend at line 1, i.e. right after the Title line for regular notes
-//   let insertionLine = note.type === 'Calendar' ? 0 : 1
-//   // If we have any content, check for these special cases
-//   if (lines.length > 0) {
-//     if (lines[0] === '---') {
-//       logDebug('paragraph/calcSmartPrependPoint', `- YAML start found. Will check ${lines.length} lines`)
-//       // We (probably) have a YAML block
-//       // Find end of YAML/frontmatter
-//       for (let i = 1; i < lines.length; i++) {
-//         if (lines[i] === '---' || lines[i] === '...') {
-//           // logDebug('???', `YAML end at ${i}`)
-//           insertionLine = i + 1
-//           break
-//         }
-//       }
-//       if (insertionLine === 1) {
-//         // If we get here we haven't found an end to the YAML block.
-//         logWarn('paragraph/calcSmartPrependPoint', `- Couldn't find end of YAML frontmatter in note ${displayTitle(note)}`)
-//         // It's not clear what to do at this point, so will leave insertion point as is
-//       }
-//     } else if (lines.length >= 2 && lines[1].match(/^#[A-z]/)) {
-//       // We have a hashtag at the start of the line, making this a metadata line
-//       // Move insertion point to after the next blank line, or before the next
-//       // heading line, whichever is sooner.
-//       logDebug('paragraph/calcSmartPrependPoint', `- Metadata line found`)
-//       for (let i = 2; i < lines.length; i++) {
-//         // logDebug('???', `${i}: ${lines[i]}`)
-//         if (lines[i].match(/^#{1,5}\s/)) {
-//           logDebug('paragraph/calcSmartPrependPoint', `  - Heading at ${i}`)
-//           insertionLine = i + 1
-//           break
-//         } else if (lines[i] === '') {
-//           logDebug('paragraph/calcSmartPrependPoint', `  - Blank line at ${i}`)
-//           insertionLine = i + 1
-//           break
-//         }
-//       }
-//     } else {
-//       logDebug('paragraph/calcSmartPrependPoint', `  - neither frontmatter nor metadata line found -> line ${insertionLine}`)
-//     }
-//   }
-//   // Return the smarter insertionLine number
-//   return insertionLine
-// }
-
-/**
  * Appends text to a chosen note, but more smartly than usual.
  * I.e. adds before any ## Done or ## Completed archive section.
  * @author @jgclark
@@ -244,6 +237,7 @@ export function smartPrependPara(note: TNote, paraText: string, paragraphType: P
  * Works out where the first 'active' line of the note is, following the first paragraph of type 'title', or frontmatter (if present).
  * Additionally, it skips past any front-matter like section in a project note, as used by the Reviews plugin before frontmatter was supported.
  * This is indicated by a #hashtag starting the next line. If there is, run on to next heading or blank line.
+ * A task/checklist item marks the end of the frontmatter-like section.
  * Note: given this is a precursor to writing to a note, it first checks if the note is completely empty (0 lines). If so, a first 'empty' line is added, to avoid edge cases in calling code.
  * Note: Really should live in helpers/NPParagraph.js, but that introduces a circular dependency, so leaving here.
  * @author @jgclark
@@ -258,7 +252,7 @@ export function findStartOfActivePartOfNote(note: CoreNoteFields, allowPreamble?
     let paras = note.paragraphs
     // First check there's actually anything at all! If note, add a first empty paragraph
     if (paras.length === 0) {
-      logDebug(`paragraph/findStartOfActivePartOfNote`, `Note was empty; adding a blank line to make writing to the note work`)
+      // logDebug(`paragraph/findStartOfActivePartOfNote`, `Note was empty; adding a blank line to make writing to the note work`)
       note.appendParagraph('', 'empty')
       return 0
     }
@@ -267,43 +261,44 @@ export function findStartOfActivePartOfNote(note: CoreNoteFields, allowPreamble?
     if (endOfFMIndex === 0) {
       // No frontmatter found
       if (paras[0].type === 'title' && paras[0].headingLevel === 1) {
-        logDebug(`paragraph/findStartOfActivePartOfNote`, `No frontmatter, but H1 title found -> next line`)
+        // logDebug(`paragraph/findStartOfActivePartOfNote`, `No frontmatter, but H1 title found -> next line`)
         startOfActive = 1
       } else {
-        logDebug(`paragraph/findStartOfActivePartOfNote`, `No frontmatter or H1 title found -> first line`)
+        // logDebug(`paragraph/findStartOfActivePartOfNote`, `No frontmatter or H1 title found -> first line`)
         startOfActive = 0
       }
     } else {
-      logDebug(`paragraph/findStartOfActivePartOfNote`, `Frontmatter found, finishing at line ${String(endOfFMIndex)}, so looking at line after it`)
+      // logDebug(`paragraph/findStartOfActivePartOfNote`, `Frontmatter found, finishing at line ${String(endOfFMIndex)}, so looking at line after it`)
       startOfActive = endOfFMIndex + 1
     }
     // If there is no line after title or FM, add a blank line to use (NB: length = line index + 1)
     if (paras.length === startOfActive) {
-      logDebug('paragraph/findStartOfActivePartOfNote', `Added a blank line after title/frontmatter of '${displayTitle(note)}'`)
+      // logDebug('paragraph/findStartOfActivePartOfNote', `Added a blank line after title/frontmatter of '${displayTitle(note)}'`)
       note.appendParagraph('', 'empty')
       paras = note.paragraphs
+      startOfActive = paras.length
     }
 
-    logDebug('paragraph/findStartOfActivePartOfNote', `allowPreamble? ${String(allowPreamble)}`)
+    logDebug('paragraph/findStartOfActivePartOfNote', `- startOfActive so far = ${String(startOfActive)}. allowPreamble: ${allowPreamble ? 'true' : 'false'}`)
     // Additionally, skip past any front-matter-like section in a project note,
     // if either there's a #hashtag starting the next line,
     // or 'allowPreamble' is true.
-    // If there is, run on to next heading or blank line (if found) otherwise, just the next line. Finding a separator also stops the search.
-    if (paras[startOfActive].type === 'text' && paras[startOfActive].content.match(/^#\w/) || allowPreamble) {
-      logDebug('paragraph/findStartOfActivePartOfNote', `with ${String(startOfActive)} Found a metadata line, or we want to allow preamble, so trying to find next heading or blank line`)
-      startOfActive += 1
+    // If there is, run on to next heading or blank line (if found) otherwise, just the next line. Finding a separator or any YouTutype of task or checklist also stops the search.
+    if (allowPreamble || paras[startOfActive].type === 'text' && paras[startOfActive].content.match(/^#\w/)) {
+      logDebug('paragraph/findStartOfActivePartOfNote', `- We want to allow preamble, or found a metadata line.`)
+    // startOfActive += 1
       for (let i = startOfActive; i < paras.length; i++) {
         const p = paras[i]
-        if (p.type === 'separator' || p.type === 'empty') {
-          startOfActive = i + 1
-          break
-        }
-        // if (p.type === 'title' || p.type === 'empty') {
-        if (p.type === 'title') {
+        if (['open', 'done', 'scheduled', 'cancelled', 'checklist', 'checklistDone', 'checklistScheduled', 'checklistCancelled', 'title', 'code'].includes(p.type)) {
+          logDebug('paragraph/findStartOfActivePartOfNote', `  - Found task/checklist/title/code line -> this line.`)
           startOfActive = i
           break
         }
-        logDebug('paragraph/findStartOfActivePartOfNote', `  - no title/separator/empty found`)
+        else if (p.type === 'separator' || p.type === 'empty') {
+          logDebug('paragraph/findStartOfActivePartOfNote', `  - Found separator/blank -> next line.`)
+          startOfActive = i + 1
+          break
+        }
       }
       logDebug('paragraph/findStartOfActivePartOfNote', `-> ${String(startOfActive)}  (after finding preamble or metadata line)`)
     }
@@ -327,37 +322,43 @@ export function findStartOfActivePartOfNote(note: CoreNoteFields, allowPreamble?
  * @returns {number} - the index number (counting from zero)
  */
 export function findEndOfActivePartOfNote(note: CoreNoteFields): number {
+  try {
   const paras = note.paragraphs
   let lineCount = paras.length
 
   // If no lines, return 0
-  if (lineCount === 0) {
-    return 0
-  } else {
-    // If last line is empty, ignore it.
-    if (paras[paras.length - 1].type === 'empty') {
-      // logDebug('paragraph/findEndOfActivePartOfNote', `last para is empty so ignoring it`)
-      lineCount--
-    }
+    if (lineCount === 0) {
+      return 0
+    } else {
+      // If last line is empty, ignore it.
+      if (paras[paras.length - 1].type === 'empty') {
+        // logDebug('paragraph/findEndOfActivePartOfNote', `last para is empty so ignoring it`)
+        lineCount--
+      }
 
-    // Find first example of ## Done
-    const doneHeaderLines = paras.filter((p) => p.headingLevel === 2 && p.content.startsWith('Done')) ?? []
-    let doneHeaderLine = doneHeaderLines.length > 0 ? doneHeaderLines[0].lineIndex : 0
-    // Now check to see if previous line was a separator; if so use that line instead
-    if (doneHeaderLine > 2 && paras[doneHeaderLine - 1].type === 'separator') {
-      doneHeaderLine -= 1
-    }
-    // Find first example of ## Cancelled
-    const cancelledHeaderLines = paras.filter((p) => p.headingLevel === 2 && p.content.startsWith('Cancelled')) ?? []
-    let cancelledHeaderLine = cancelledHeaderLines.length > 0 ? cancelledHeaderLines[0].lineIndex : 0
-    // Now check to see if previous line was a separator; if so use that line instead
-    if (cancelledHeaderLine > 2 && paras[cancelledHeaderLine - 1].type === 'separator') {
-      cancelledHeaderLine -= 1
-    }
+      // Find first example of ## Done
+      const doneHeaderLines = paras.filter((p) => p.headingLevel === 2 && p.content.startsWith('Done')) ?? []
+      let doneHeaderLine = doneHeaderLines.length > 0 ? doneHeaderLines[0].lineIndex : 0
+      // Now check to see if previous line was a separator; if so use that line instead
+      if (doneHeaderLine > 2 && paras[doneHeaderLine - 1].type === 'separator') {
+        doneHeaderLine -= 1
+      }
+      // Find first example of ## Cancelled
+      const cancelledHeaderLines = paras.filter((p) => p.headingLevel === 2 && p.content.startsWith('Cancelled')) ?? []
+      let cancelledHeaderLine = cancelledHeaderLines.length > 0 ? cancelledHeaderLines[0].lineIndex : 0
+      // Now check to see if previous line was a separator; if so use that line instead
+      if (cancelledHeaderLine > 2 && paras[cancelledHeaderLine - 1].type === 'separator') {
+        cancelledHeaderLine -= 1
+      }
 
-    const endOfActive = doneHeaderLine > 1 ? doneHeaderLine - 1 : cancelledHeaderLine > 1 ? cancelledHeaderLine - 1 : lineCount > 1 ? lineCount - 1 : 0
-    logDebug('paragraph/findEndOfActivePartOfNote', `doneHeaderLine = ${doneHeaderLine}, cancelledHeaderLine = ${cancelledHeaderLine} endOfActive = ${endOfActive}`)
-    return endOfActive
+      const endOfActive = doneHeaderLine > 1 ? doneHeaderLine - 1 : cancelledHeaderLine > 1 ? cancelledHeaderLine - 1 : lineCount > 1 ? lineCount - 1 : 0
+      // logDebug('paragraph/findEndOfActivePartOfNote', `doneHeaderLine = ${doneHeaderLine}, cancelledHeaderLine = ${cancelledHeaderLine} endOfActive = ${endOfActive}`)
+      return endOfActive
+    }
+  }
+  catch (err) {
+    logError('paragraph/findEndOfActivePartOfNote', err.message)
+    return NaN // for completeness
   }
 }
 
@@ -369,30 +370,36 @@ export function findEndOfActivePartOfNote(note: CoreNoteFields): number {
  * @returns {number} - the line index number of the closing separator, or 0 if no frontmatter found
  */
 export function endOfFrontmatterLineIndex(note: CoreNoteFields): number {
+  try {
   const paras = note.paragraphs
   const lineCount = paras.length
-  logDebug(`paragraph/endOfFrontmatterLineIndex`, `total paragraphs in note (lineCount) = ${lineCount}`)
+  // logDebug(`paragraph/endOfFrontmatterLineIndex`, `total paragraphs in note (lineCount) = ${lineCount}`)
   if (paras.filter((p) => p.type === 'separator').length < 2) {
     // can't have frontmatter as less than 2 separators
     return 0
   }
   let inFrontMatter: boolean = false
   let lineIndex = 0
-  while (lineIndex < lineCount) {
-    const p = paras[lineIndex]
-    if (p.type === 'separator') {
-      logDebug(`p/eOFLI`, `  - ${String(lineIndex)}: ${String(inFrontMatter)}: ${p.type}`)
-      if (!inFrontMatter) {
-        inFrontMatter = true
-      } else {
-        inFrontMatter = false
-        logDebug(`paragraph/endOfFrontmatterLineIndex`, `-> ${String(lineIndex)}`)
-        return lineIndex
+    while (lineIndex < lineCount) {
+      const p = paras[lineIndex]
+      if (p.type === 'separator') {
+        // logDebug(`paragraph/endOfFrontmatterLineIndex`, `  - ${String(lineIndex)}: ${String(inFrontMatter)}: ${p.type}`)
+        if (!inFrontMatter) {
+          inFrontMatter = true
+        } else {
+          inFrontMatter = false
+          // logDebug(`paragraph/endOfFrontmatterLineIndex`, `-> ${String(lineIndex)}`)
+          return lineIndex
+        }
       }
+      lineIndex++
     }
-    lineIndex++
+    return 0
   }
-  return 0
+  catch (err) {
+    logError('paragraph/findEndOfActivePartOfNote', err.message)
+    return NaN // for completeness
+  }
 }
 
 /**
@@ -482,69 +489,64 @@ export function removeDuplicateSyncedLines(paras: $ReadOnlyArray<TParagraph>): $
 }
 
 /**
- * Take a (multi-line) raw content block, typically from the editor, and turn it into an array of TParagraph-like objects
- * Designed to be used with Editor.content that is available in a trigger, before Editor.note.paragraphs is updated.
- * Only writes "type", "content", "rawContent", "lineIndex" fields.
- * TODO: make tests
- * @author @jgclark
- * @param {string} content to parse
- * @returns {Array<any>} array of TParagraph-like objects
+ * Get number of consecutive '!' in 'content' that aren't at the start/end of a word, or preceding a '['
+ * From 3.9.4 there are also `>>` working-on markers at the start of 'content', which are treated as priority 5.
+ * @param {string} content
+ * @returns {string} number of !, or 5 if line is flagged as 'working-on', or -1
  */
-export function makeBasicParasFromContent(content: string): Array<any> {
-  try {
-    const editorLines = content.split('\n')
-    logDebug('makeBasicParasFromEditorContent', `Starting with ${String(editorLines.length)} lines of editorContent}`)
-    const basicParas = []
-    let c = 0
-    for (const thisLine of editorLines) {
-      const thisPara = {}
-      // FIXME:
-      if (thisLine.match(/^\s*([\*\-]\s[^\[]|[\*\-]\s\[\s\])/)) {
-        thisPara.type = 'open'
-      }
-      else if (thisLine.match(/^\s*([\*\-]\s\[>\])/)) {
-        thisPara.type = 'scheduled'
-      }
-      // FIXME:
-      else if (thisLine.match(/^\s*(\+\s[^\[]|\+\s\[ \])/)) {
-        thisPara.type = 'checklist'
-      }
-      else if (thisLine.match(/^\s*(\+\s\[>\])/)) {
-        thisPara.type = 'checklistScheduled'
-      }
-      if (thisLine.match(/^\s*([\*\-]\s\[x\])/)) {
-        thisPara.type = 'done'
-      }
-      else if (thisLine.match(/^\s*([\*\-]\s\[\-\])/)) {
-        thisPara.type = 'cancelled'
-      }
-      else if (thisLine.match(/^\s*(\+\s\[x\])/)) {
-        thisPara.type = 'checklistDone'
-      }
-      else if (thisLine.match(/^\s*(\+\s\[\-\])/)) {
-        thisPara.type = 'checklistCancelled'
-      }
-      else if (thisLine === '---') {
-        thisPara.type = 'separator'
-      }
-      else if (thisLine === '') {
-        thisPara.type = 'empty'
-      }
-      else {
-        thisPara.type = 'text'
-      }
-      thisPara.lineIndex = c
-      thisPara.rawContent = thisLine
-      const startOfMainLineContentPos = getLineMainContentPos(thisLine)
-      thisPara.content = thisLine.slice(startOfMainLineContentPos)
-      basicParas.push(thisPara)
-      clo(thisPara, `${c}: `)
-      c++
-    }
-    return basicParas
+export function getTaskPriority(content: string): number {
+  let numExclamations = 0
+  if (content.match(/\B\!+\B(?!\[)/)) { // not in middle of word, or starting an image tag
+    // $FlowIgnore[incompatible-use]
+    numExclamations = content.match(/\B\!+\B/)[0].length
+    return numExclamations
   }
-  catch (error) {
-    logError('makeBasicParasFromEditorContent', `${error.message} for input '${content}'`)
-    return []
+  if (content.match(/^>>/)) {
+    return 4
   }
+  return 0
+}
+
+/**
+ * Remove task Priority Indicators (!, !!, !!!, >>) from content, though not starting an image tag, or at start/end of a word
+ * @param {string} content
+ * @returns {string} content minus any priority indicators
+ */
+export function removeTaskPriorityIndicators(content: string): string {
+  let output = content.replace(/\B\!+\B(?!\[)/g, '') // not in middle of word, or starting an image tag
+  output = output.replace(/^>>\s?/, '') // start of line only
+  return output
+}
+
+/**
+ * Change the priority in a task to '!', '!!', '!!!', '>>' (or remove priority)
+ * @author @dwertheimer updated by @jgclark
+ * @param {TParagraph} input - the task/pagraph to be processed
+ * @param {string} priorityString - the new priority (!,!!,!!! or '' for none)
+ * @param {boolean} - commit the change after the change is made (default false)
+ * @returns {string} the resulting updated paragraph's content
+ * Note: If the third param is missing or false, THE CHANGE HAS NOT BEEN COMMITTED YET. You should use note.updateParagraph(s) to commit the change you receive back.
+ * Note: Ideally lives in NPParagraph.js, but putting it here avoids a circular dependency
+ */
+export function changePriority(inputPara: TParagraph, prioStr: string, commitChange?: boolean = false): string {
+  const outputPara = inputPara
+  outputPara.content = outputPara.content.replace(/!\s*/g, '').replace(/\s+!/g, '').replace(/^>>\s/, '')
+  outputPara.content = `${prioStr ? `${prioStr} ` : ''}${outputPara.content}`.trim()
+  commitChange && outputPara.note ? outputPara.note.updateParagraph(outputPara) : null
+  return outputPara.content
+}
+
+const PRIORITY_LEVELS = ['', '!', '!!', '!!!', '>>']
+
+/**
+ * Cycle the priority level of a task: none -> ! -> !! -> !!! -> >> -> none
+ * Written to suit a single UI window in the Dashboard.
+ * @author @jgclark
+ * @param {TParagraph} input - the task/pagraph to be processed
+ * @returns {string} the resulting updated paragraph's content
+ */
+export function cyclePriorityState(input: TParagraph): string {
+  const currentPriorityLevel = getTaskPriority(input.content)
+  const newPriorityLevel = (currentPriorityLevel + 1) % 5
+  return changePriority(input, PRIORITY_LEVELS[newPriorityLevel], true)
 }

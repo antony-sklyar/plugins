@@ -1,10 +1,90 @@
-# What's changed in 🔬 Reviews plugin?
+# What's changed in 🔬 Projects + Reviews plugin?
 See [website README for more details](https://github.com/NotePlan/plugins/tree/main/jgclark.Reviews), and how to configure.
+<!-- - resize action -->
+<!-- checkboxes for only display overdue, and showing finished items -->
+## [0.13.0] - 2023-12-26
+### Added
+- When you complete or cancel a project, and you opt to move it to the Archive, there is a new option that now will move it into the Archive replicating its existing folder structure. (This is the same thing that the Filer plugin's "/archive note using folder structure" command does, though Filer does not need to be installed to use this.)
+- When the project list is refreshed, it will now also refresh the Dashboard if it is open, as it can also show project notes waiting for review. (Requires Dashboard plugin to be installed, naturally.)
 
-<!--
-- ??? Fixed the race condition on (un)pausing a project
-- ??? ability to pause/unpause a project, by calling new **/pause project toggle** command or adding/removing `#paused` to a project's metadata. When paused this stops the note from being included in reviews, but keeps it visible in the project lists.
--->
+### Changed
+- Now smarter about how it writes a 'project metadata line' if one isn't already present in the note.
+
+## [0.12.5] - 2023-12-22
+### Added
+- When you refresh the project list it will now keep the window's scroll position (for @anton.skliar)
+- Support for themes with headings that have coloured backgrounds (for @JohnnyWhoop)
+
+### Fixes
+- now includes relevant files from the root folder too
+
+## [0.12.4] - 2023-08-30
+### Fixes
+- re-write to allow comment lines to work again when running on macOS Big Sur
+- fix regression that meant setting "How to show completed/cancelled projects?" to "hide" didn't work.
+
+## [0.12.3] - 2023-08-22
+### Added
+- ability to run Project List window at the same time as the Dashboard window etc. (Requires NP v3.9.6.)
+### Changes
+- all the review actions (finish, skip, pause, complete and cancel) now properly update the summary list in the window, not just the underlying notes. (It had been _trying_ to do this, but I've now found the way around the problem of stale data being returned by the API 🥳.)
+- now keeps completion at 99% unless absolutely all tasks are done. Previously it rounded to the nearest %. (suggested by @bethv)
+
+## [0.12.2] - 2023-08-09
+- fix in /start reviews and /next project review commands
+
+## [0.12.1] - 2023-07-22
+- under-the-hood change to help Dashboard plugin.
+
+## [0.12.0] - 2023-06-24
+### Added
+- new **/add progress update** command, that prompts for a short progress update (text) and current % complete (number). This is inserted into the metadata area of the current project note. It also updates the `@reviewed(...)` date and refresh the project list display.<!-- first part done in v0.11.1-->
+- new control button 'Add Progress' to make it easy to add a 'Progress: ...' line for the currently open project note (for @John1)
+- more flexibility for 'Progress:' lines: if you don't supply a percentage completion, then it will now calculate it for you (for @loupgaroublond)
+- new **/Projects: update plugin settings** command, that can work on iOS
+<!-- ## [0.11.1] - unreleased
+### Added -->
+- the Review List's window size and position is now saved whenever its content is refreshed, and is reused when you next re-open it. (_This feature requires NP v3.9.1+_)
+- when pausing a project (through the review list or the "pause project toggle" command) it now offers to write a reason as a progress update in the metadata.
+- the Review List updates itself after every relevant review action. Previously it often required hitting 'Refresh' to show the updated state. (_This feature requires NP v3.9.3+_)
+### Changed
+- when running '/finishReview' the Review List no longer opens if it isn't already open
+### Fixed
+- running from x-callbacks with passed parameters e.g. `{"foldersToInclude": "something", "displayOrder": "title" }` (thanks to tip from @1nvictus)
+
+## [0.11.0] - 2023-05-10
+### Added
+- New "skip review" command. This adds a `@nextReview(date)` of your choosing to the current project note, that overrides the normal review interval for it, and jumps to the next project to review. (for @dbludeau, #417)
+- New "How to show completed/cancelled projects?" setting, with options 'display at end', 'display' or 'hide' (for @dwertheimer).
+### Changed
+- the 'Folders to Ignore' setting now matches anywhere in the folder name (for @dwertheimer)
+- Switch note links to using x-callback based on filename, not note title, which avoids problems with duplicate note titles (thanks to @dwertheimer, #447)
+- Lots of code tidying, with some further tune ups, preparing for future features.
+### Fixes
+- hopefully finally found the way to make the displayed lists update properly after most review or project actions 🥳
+
+## [0.10.2] - 2023-05-06
+### Changed
+- further speed up when calculating set of notes to show (thanks to @dwertheimer)
+
+## [0.10.1] - 2023-05-05
+### Changed
+- the 'Folders to Include' setting now matches anywhere in the folder name (for @dwertheimer)
+### Fixed
+- it could fail when running NP 3.9.0 or earlier
+
+## [0.10.0] - 2023-05-04
+### New
+- big speed up possible on large collections by specifying new 'Folders to Include' setting. (addresses [#442](https://github.com/NotePlan/plugins/issues/442) for @dwertheimer)
+### Fixed
+- it was possible for `@reviewed(...)` tags to get repeated when a review was finished (thanks for reports by @Denrael and @george65)
+
+## [0.9.5] - 2023-03-25
+### Changed
+- when making the Project Review list, the matches to 'Hashtags to review' are now case insensitive
+### Fixed
+- fixed display when a note had more than one matching 'Hashtags to review'
+
 ## [0.9.4] - 2023-03-04
 ### Fixed
 - 'start reviews' button not working
@@ -30,7 +110,7 @@ See [website README for more details](https://github.com/NotePlan/plugins/tree/m
 
 ## [0.9.1] - 2023-02-24
 ### Fixed
-- wasn't showing projects due for review today in 'Start Reviews'
+- wasn't showing projects due for review today in 'Start Reviews' (thanks to report by @dbr and @Hanideal)
 
 ## [0.9.0] - 2023-02-23
 ### Added

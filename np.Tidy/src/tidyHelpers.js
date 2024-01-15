@@ -2,11 +2,12 @@
 //-----------------------------------------------------------------------------
 // Helper functions for Tidy plugin
 // Jonathan Clark
-// Last updated 26.3.2023 for v0.4.0, @jgclark
+// Last updated 27.8.2023 for v0.9.0, @jgclark
 //-----------------------------------------------------------------------------
 
 import pluginJson from '../plugin.json'
 import moment from 'moment/min/moment-with-locales'
+import { castStringFromMixed } from '@helpers/dataManipulation'
 import { clo, logDebug, logError, logInfo, logWarn } from '@helpers/dev'
 import { findEndOfActivePartOfNote } from '@helpers/paragraph'
 
@@ -16,17 +17,28 @@ import { findEndOfActivePartOfNote } from '@helpers/paragraph'
 const pluginID = 'np.Tidy'
 
 export type TidyConfig = {
-  foldersToExclude: Array<string>,
+  rootNotesToIgnore: Array<string>,
+  listFoldersToExclude: Array<string>,
   justRemoveFromChecklists: boolean,
   matchType: string,
   numDays: number,
-  rootNotesToIgnore: Array<string>,
+  conflictedNoteFilename: string,
+  duplicateNoteFilename: string,
+  doubledNoteFilename: string,
+  stubsNoteFilename: string,
+  removeFoldersToExclude: Array<string>,
+  runRemoveBlankNotes: boolean,
+  runConflictFinderCommand: boolean,
+  runDuplicateFinderCommand: boolean,
   runFileRootNotesCommand: boolean,
   runRemoveOrphansCommand: boolean,
   runRemoveDoneMarkersCommand: boolean,
   runRemoveDoneTimePartsCommand: boolean,
   runRemoveSectionFromNotesCommand: boolean,
   removeTriggersFromRecentCalendarNotes: boolean,
+  removeTodayTagsFromCompletedTodos: boolean,
+  moveTopLevelTasksInEditor: boolean,
+  moveTopLevelTasksHeading: string,
   runSilently: boolean,
   _logLevel: string,
 }
@@ -98,4 +110,34 @@ export function returnRegexMatchedParas(notesIn: Array<TNote>, regexIn: RegExp):
   } catch (error) {
     logError(`${pluginJson}/repeats`, error.message)
   }
+}
+
+/**
+ * Show value/total as a percent (limiting number of digits of precision shown) of form 'value term (%)' (or if 0, then just '0 term')
+ * @param {number} value
+ * @param {number} total
+ * @param {string} term (optional) term to use
+ * @returns {string}
+ */
+export function percentWithTerm(value: number, total: number, term: string): string {
+  if (total === 0) {
+    return `invalid% ${term}`
+  }
+  if (value === 0) {
+    return `${value.toLocaleString()} ${term}`
+  }
+  const locale = getLocale({})
+  const intlOptions = { maximumFractionDigits: 1, minimumSignificantDigits: 2, maximumSignificantDigits: 2 }
+  const percentStr = ((value / total) * 100).toLocaleString(locale, intlOptions)
+  return `${value.toLocaleString(locale)} ${term} (${percentStr}%)`
+}
+
+// Get locale: if blank in settings then get from NP environment (from 3.3.2)
+// or if not available default to 'en-US'
+function getLocale(tempConfig: Object): string {
+  const envRegion = NotePlan?.environment ? NotePlan?.environment?.regionCode : ''
+  const envLanguage = NotePlan?.environment ? NotePlan?.environment?.languageCode : ''
+  let tempLocale = castStringFromMixed(tempConfig, 'locale')
+  tempLocale = tempLocale != null && tempLocale !== '' ? tempLocale : envRegion !== '' ? `${envLanguage}-${envRegion}` : 'en-US'
+  return tempLocale
 }

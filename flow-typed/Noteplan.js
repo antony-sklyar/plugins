@@ -110,7 +110,7 @@ declare interface TEditor extends CoreNoteFields {
     highlightStart?: number,
     highlightEnd?: number,
     splitView?: boolean,
-    createIfNeeded?: false,
+    createIfNeeded?: boolean,
     content?: string,
   ): Promise<TNote | void>;
   openNoteByFilename(
@@ -269,7 +269,7 @@ declare interface TEditor extends CoreNoteFields {
    * Use this together with `showLoading`, so that the work you do is not blocking the user interface.
    * Otherwise the loading window will be also blocked.
    *
-   * Warning: Don't use any user interface calls (other than showLoading) on an asynchronous thread. The app might crash.
+   * Warning: Don't use any user interface calls (including Editor.* calls, other than showLoading) on an asynchronous thread. The app might crash.
    * You need to return to the main thread before you change anything in the window (such as Editor functions do).
    * Use `onMainThread()` to return to the main thread.
    * Note: Available from v3.0.26
@@ -284,6 +284,12 @@ declare interface TEditor extends CoreNoteFields {
    * @return {Promise}
    */
   onMainThread(): Promise<void>;
+  /**
+   * Save content of Editor to file. This can be used before updateCache() to ensure latest changes are available quickly.
+   * Warning: beware possiblity of this causing an infinite loop, particularly if used in a function call be an onEditorWillSave trigger.
+   * Note: Available from 3.9.3
+   */
+  save(): Promise<void>;
   /**
    * Get the names of all supported themes (including custom themes imported into the Theme folder).
    * Use together with `.setTheme(name)`
@@ -338,36 +344,50 @@ declare interface TEditor extends CoreNoteFields {
    */
   +currentSystemMode: string;
 
-/**
- * Get a unique ID for the editor to make it easier to identify it later
- * Note: Available from NotePlan v3.8.1 build 973
- * @returns {string}
- */
-+id: string;
-/**
- * Set / get a custom identifier, so you don't need to cache the unique id.
- * Note: Available from NotePlan v3.8.1 build 973
- * @returns {string}
- */
-customId: string;
-/**
- * Type of window where the editor is embedded in. 
- * Possible values: main|split|floating|unsupported
- * It's unsupported on iOS at the moment.
- * Note: Available from NotePlan v3.8.1 build 973
- * @returns {string}
- */
-+type: string;
-/**
- * Get the cursor into a specific editor and send the window to the front.
- * Note: Available from NotePlan v3.8.1 build 973
- */
-focus(): void;
-/**
- * Close the split view or window. If it's the main note, it will close the complete main window.
- * Note: Available from NotePlan v3.8.1 build 973
- */
-close(): void;
+  /**
+   * Get a unique ID for the editor to make it easier to identify it later
+   * Note: Available from NotePlan v3.8.1 build 973
+   * @returns {string}
+   */
+  +id: string;
+  /**
+   * Set / get a custom identifier, so you don't need to cache the unique id.
+   * Generally speaking you should set (or at least start) this string with the plugin's ID, e.g. pluginJson['plugin.id']
+   * Note: Available from NotePlan v3.8.1 build 973
+   * @returns {string}
+   */
+  customId: string;
+  /**
+   * Get the type of window where the editor is embedded in.
+   * Possible values: main|split|floating|unsupported
+   * It's unsupported on iOS at the moment.
+   * Note: Available from NotePlan v3.8.1 build 973
+   * @returns {string}
+   */
+  +windowType: string;
+  /**
+   * Get the cursor into a specific editor and send the window to the front.
+   * Note: Available from NotePlan v3.8.1 build 973
+   */
+  focus(): void;
+  /**
+   * Close the split view or window. If it's the main note, it will close the complete main window.
+   * Note: Available from NotePlan v3.8.1 build 973
+   */
+  close(): void;
+  /**
+   * Set / get the position and size of the window that contains the editor. Returns an object with x, y, width, height values.
+   * If you want to change the coordinates or size, save the rect in a variable, modify the variable, then assign it to windowRect.
+   * The position of the window might not be very intuitive, because the coordinate system of the screen works differently (starts at the bottom left for example). Recommended is to adjust the size and position of the window relatively to it's values or other windows.
+   * Example:
+   *   const rect = Editor.windowRect
+   *   rect.height -= 50
+   *   Editor.windowRect = rect
+   *
+   * Note: for split windows, or any others in the 'main' window, this returns the position and size of the whole window, including any sidebars that are showing.
+   * Note: Available with v3.9.1 build 1020
+   */
+  windowRect: Rect;
 }
 
 /**
@@ -405,6 +425,7 @@ declare class DataStore {
   /**
    * Get all regular, project notes.
    * Note: This includes notes and templates from folders that begin with "@" such as "@Archive" and "@Templates". It excludes notes in the trash folder though.
+   * Note: @jgclark adds that this will return non-note document files (e.g. PDFs) as well as notes.
    */
   static +projectNotes: $ReadOnlyArray<TNote>;
   /**
@@ -426,7 +447,13 @@ declare class DataStore {
    * Note: Available from v3.6.0
    * @type {Array<string>}
    */
-static + filters: $ReadOnlyArray < string >;
+  static +filters: $ReadOnlyArray<string>;
+  /**
+   * Get list of all overdue tasks as paragraphs
+   * Note: Available from v3.8.1
+   * @type {Array<TParagraph>}
+   */
+  static listOverdueTasks(): $ReadOnlyArray<TParagraph>;
 
   /**
    * Get or set settings for the current plugin (as a JavaScript object).
@@ -455,8 +482,10 @@ static + filters: $ReadOnlyArray < string >;
    *   "fontSize"                // Font size defined in editor preferences (might be overwritten by custom theme)
    *   "fontFamily"              // Font family defined in editor preferences (might be overwritten by custom theme)
    *   "timeblockTextMustContainString" // Optional text to trigger timeblock detection in a line
+   *   "openAIKey" // Optional user's openAIKey (from v3.9.3 build 1063)
    * Others can be set by plugins.
    * Note: these keys and values do not sync across a user's devices; they are only local.
+   * The keys are case-sensitive (it uses the Apple UserDefaults mechanism).
    */
   static +preference: (key: string) => mixed;
   /**
@@ -478,17 +507,18 @@ static + filters: $ReadOnlyArray < string >;
    * It's saved automatically into a new folder "data" in the Plugins folder.
    * But you can "escape" this folder using relative paths: ../Plugins/<folder or filename>.
    * Note: Available from v3.1
-   * @param {Object}
-   * @param {string}
-   * @return {boolean}
+   * @param {Object} jsonData to save
+   * @param {string?} filename (defaults to plugin's setting.json file)
+   * @param {boolean?} shouldBlockUpdate? (defaults to false)
+   * @returns {boolean} success
    */
-  static saveJSON(object: Object, filename?: string): boolean;
+  static saveJSON(object: Object, filename?: string, shouldBlockUpdate?: boolean): boolean;
   /**
    * Load a JavaScript object from a JSON file located (by default) in the <Plugin>/data folder.
    * But you can also use relative paths: ../Plugins/<folder or filename>.
    * Note: Available from v3.1
-   * @param {string}
-   * @return {Object}
+   * @param {string} filename (defaults to plugin's setting.json)
+   * @returns {Object}
    */
   static loadJSON(filename?: string): Object;
   /**
@@ -569,17 +599,17 @@ static + filters: $ReadOnlyArray < string >;
    */
   static noteByFilename(filename: string, type: NoteType): ?TNote;
   /**
-   * Move a regular note using the given filename (with extension) to another
-   * folder. Use "/" for the root folder.
+   * Move a regular note using the given filename (with extension) to another folder. Use "/" for the root folder.
+   * Note: from v3.9.3 you can also use 'type' set to 'calendar' to move a calendar note.
    * Returns the final filename; if the there is a duplicate, it will add a number.
    */
-  static moveNote(noteName: string, folder: string): ?string;
+  static moveNote(filename: string, folder: string, type?: string): ?string;
   /**
    * Creates a regular note using the given title and folder.
    * Use "/" for the root folder.
    * It will write the given title as "# title" into the new file.
    * Returns the final filename; if the there is a duplicate, it will add a number.
-   * Note: @jgclark finds that if 'folder' has different capitalisation than an existing folder, NP gets confused, in a way that reset caches doesn't solve. It needs a restart. 
+   * Note: @jgclark finds that if 'folder' has different capitalisation than an existing folder, NP gets confused, in a way that reset caches doesn't solve. It needs a restart.
    */
   static newNote(noteTitle: string, folder: string): ?string;
   /**
@@ -613,29 +643,27 @@ static + filters: $ReadOnlyArray < string >;
    * If so, the note has to be reloaded for the updated .mentions to be available.
    * Note: Available from NotePlan v3.7.1
    * @param {TNote} note to update
-   * @param {Boolean} shouldUpdateTags?
+   * @param {boolean} shouldUpdateTags?
+   * @returns {TNote?} updated note object
    */
-  static updateCache(note, shouldUpdateTags): void;
+  static updateCache(note, shouldUpdateTags): TNote | null;
 
   /**
    * Loads all available plugins asynchronously from the GitHub repository and returns a list.
-   * You can show a loading indicator using the first parameter (true) if this is part of some user interaction. Otherwise, pass "false" so it happens in the background.
-   * Set `showHidden` to true if it should also load hidden plugins. Hidden plugins have a flag `isHidden`.
-   * Set the third parameter `skipMatchingLocalPlugins` to true if you want to see only the available plugins from GitHub and not merge the data with the locally available plugins. Then the version will always be that of the plugin that is available online.
    * Note: Available from NotePlan v3.5.2; 'skipMatchingLocalPlugins' added v3.7.2 build 926
-   * @param {boolean} showLoading?
-   * @param {boolean} showHidden?
-   * @param {boolean} skipMatchingLocalPlugins?
+   * @param {boolean} showLoading? - You can show a loading indicator using the first parameter (true) if this is part of some user interaction. Otherwise, pass "false" so it happens in the background.
+   * @param {boolean} showHidden? - Set `showHidden` to true if it should also load hidden plugins. Hidden plugins have a flag `isHidden`
+   * @param {boolean} skipMatchingLocalPlugins? - Set the third parameter `skipMatchingLocalPlugins` to true if you want to see only the available plugins from GitHub and not merge the data with the locally available plugins. Then the version will always be that of the plugin that is available online.
    * @return {Promise<any>} pluginList
    */
-  static listPlugins(showLoading, showHidden, skipMatchingLocalPlugins): Promise<Array<PluginObject>>;
+  static listPlugins(showLoading?: boolean, showHidden?: boolean, skipMatchingLocalPlugins?: boolean): Promise<Array<PluginObject>>;
   /**
    * Installs a given plugin (load a list of plugins using `.listPlugins` first). If this is part of a user interfaction, pass "true" for `showLoading` to show a loading indicator.
    * Note: Available from v3.5.2
    * @param {PluginObject}
    * @param {boolean}
    */
-  static installPlugin(pluginObject: PluginObject, showLoading: boolean): Promise<void>;
+  static installPlugin(pluginObject: PluginObject, showLoading?: boolean): Promise<void>;
   /**
    * Returns all installed plugins as PluginObject(s).
    * Note: Available from v3.5.2
@@ -743,7 +771,17 @@ static + filters: $ReadOnlyArray < string >;
    * @param {string} = keyword to search for
    * @return {$ReadOnlyArray<TParagraph>} Promise to array of results
    */
-  static listOverdueTasks(keyword: string): Promise < $ReadOnlyArray < TParagraph >>;
+  static listOverdueTasks(keyword: string): Promise<$ReadOnlyArray<TParagraph>>;
+}
+
+/**
+ * Object to pass window details (from Swift)
+ */
+type Rect = {
+  x: Integer,
+  y: Integer,
+  width: Integer,
+  height: Integer,
 }
 
 /**
@@ -877,18 +915,15 @@ declare class CommandBar {
   static showOptions<TOption: string = string>(options: $ReadOnlyArray<TOption>, placeholder: string): Promise<{ +index: number, +value: TOption }>;
   /**
    * Asks the user to enter something into the CommandBar.
-   *
-   * Use the "placeholder" value to display a question,
-   * like "Type the name of the task".
-   *
-   * Use the "submitText" to describe what happens with the selection,
-   * like "Create task named '%@'".
-   *
+   * Use the "placeholder" value to display a question, like "Type the name of the task".
+   * Use the "submitText" to describe what happens with the selection, like "Create task named '%@'".
    * The "submitText" value supports the variable "%@" in the string, that
    * NotePlan autofill with the typed text.
-   *
    * It returns a Promise, so you can wait (using "await...") for the user
    * input with the entered text as success result.
+   * @param {string} placeholder
+   * @param {string} submitText
+   * @returns {Promise<string>}
    */
   static showInput(placeholder: string, submitText: string): Promise<string>;
   /**
@@ -897,9 +932,9 @@ declare class CommandBar {
    * `progress` is also optional. If it's defined, the loading indicator will change into a progress ring. Use float numbers from 0-1 to define how much the ring is filled.
    * When you are done, call `showLoading(false)` to hide the window.
    * Note: Available from v3.0.26
-   * @param {boolean}
-   * @param {string?}
-   * @param {Float?}
+   * @param {boolean} visible?
+   * @param {string?} text
+   * @param {number?} progress (floating point)
    */
   static showLoading(visible: boolean, text?: string, progress?: number): void;
   /**
@@ -927,9 +962,9 @@ declare class CommandBar {
    * If you don't supply any buttons, an "OK" button will be displayed.
    * The promise returns selected button, with button index (0 - first button)
    * Note: Available from v3.3.2
-   * @param {string}
-   * @param {string}
-   * @param {?$ReadOnlyArray<string>}
+   * @param {string} title
+   * @param {string} message
+   * @param {$ReadOnlyArray<string>?} buttons
    */
   static prompt(title: string, message: string, buttons?: $ReadOnlyArray<string>): Promise<number>;
 
@@ -940,11 +975,11 @@ declare class CommandBar {
    * If the user selects "OK", the promise returns users entered value
    * If the user selects "Cancel", the promise returns false.
    * Note: Available from v3.3.2
-   * @param {string}
-   * @param {string?}
-   * @param {string?}
+   * @param {string} title
+   * @param {string} message
+   * @param {string?} defaultValue
    */
-  static textPrompt(title: string, message: string, defaultValue: string): Promise<string | false>;
+  static textPrompt(title: string, message: string, defaultValue?: string): Promise<string | false>;
 }
 
 type CalendarDateUnit = 'year' | 'month' | 'day' | 'hour' | 'minute' | 'second'
@@ -1025,8 +1060,9 @@ declare class Calendar {
    *    Calendar.parseDateText("* Next F1 race is Sun June 19 (Canadian GP)")
    * -> [{"index":18,"start":"2023-06-19T17:00:00.000Z","text":"Sun June 19 ","end":"2023-06-19T17:00:00.000Z"}]
    * Under the hood this uses the Chrono library.
-   * IMPORTANT NOTE:
-   * when .parseDate thinks something is an all-day event, it puts it at noon (both start/end at noon).
+   * IMPORTANT NOTES:
+   * This API does not work correctly when the input string is "today at" something (so make sure to remove the word today from your string)
+   * When .parseDate thinks something is an all-day event, it puts it at noon (both start/end at noon).
    * That means that these two (quite different) lines look identical in the return:
    *   - on Friday
    *   - on Friday at 12
@@ -1469,6 +1505,12 @@ declare interface TCalendarItem {
     url?: string,
     availability?: number,
   ): TCalendarItem;
+  /**
+   * Searches and returns all filenames it's linked to (meeting notes). Use with await. Returns an array of filenames.
+   * @returns {Array<string>} promise to filename list
+   * Note: Available from 3.9.1 (build 1020)
+   */
+  findLinkedFilenames(): Array<string>;
 }
 
 /**
@@ -1625,6 +1667,12 @@ declare interface CoreNoteFields {
    * TODO(@EduardMe): add this to the documentation.
    */
   +frontmatterAttributes: Object;
+  /**
+   * Returns the conflicted version if any, including 'url' which is the path to the file. Otherwise, returns undefined.
+   * Note: Available from v3.9.3
+   * @return { Object(filename: string, url: string, content: string) }
+   */
+  +conflictedVersion: Object;
 
   /**
    * Get all available versions of a note from the backup database. It returns an array with objects that have following attributes: `content` (full content of the note) and `date` (when this version was saved).
@@ -1848,6 +1896,17 @@ declare interface CoreNoteFields {
    * @param {boolean} addReferenceSections
    */
   printNote(addReferenceSections: boolean): void;
+
+  /**
+   * Resolves a conflict, if any, using the current version (which is version 1 in the conflict bar inside the UI). Once resolved you need to reload the note.
+   * Note: Available from v3.9.3
+   */
+  resolveConflictWithCurrentVersion(): void;
+  /**
+   * Resolves a conflict, if any, using the other version (which is version 2 in the conflict bar inside the UI). Once resolved you need to reload the note.
+   * Note: Available from v3.9.3
+   */
+  resolveConflictWithOtherVersion(): void;
 }
 
 declare class NotePlan {
@@ -1903,19 +1962,19 @@ declare class NotePlan {
    * @param {string} version2
    * @returns {Array<RangeObject>}
    */
-  static stringDiff(version1: string, version2: string): Array < RangeObject >;
+  static stringDiff(version1: string, version2: string): Array<RangeObject>;
   /**
    * Returns a list of all opened editors (in the main view, in split views and in floating windows). See more details in the "Editor" documentation.
    * Note: Available from v3.8.1 build 973
    * @returns {Array<TEditor>}
    */
-static + editors: Array < TEditor >;
+  static +editors: Array<TEditor>;
   /**
    * Returns a list of all opened HTML windows.
    * Note: Available from v3.8.1 build 973
    * @returns {Array<HTMLView>}
    */
-static + htmlWindows: Array < HTMLView >;
+  static +htmlWindows: Array<HTMLView>;
 }
 
 declare class HTMLView {
@@ -1932,52 +1991,89 @@ declare class HTMLView {
   /**
    * Open a non-modal window above the main window with the given html code and window title.
    * Note: Available from v3.7.0 (build >862)
+   * Note: Following available from v3.9.1 (build 1020):
+   * - Run it with await window = showWindow(...), so you can adjust the window position and height later.
+   * - Use shouldFocus = true if it should bring the window to the front (default = false) when you are reusing an existing window, means when you are reloading the html content.
    * @param {string} HTML to show
-   * @param {string} title for window
+   * @param {string} title for HTML window
    * @param {number?} width (optional integer)
    * @param {number?} height (optional integer)
+   * @param {boolean?} shouldFocus?
+   * @returns {Window} promise to window
    */
-  static showWindow(html: string, title: string, width?: number, height?: number): void;
+  static showWindow(html: string, title: string, width?: number, height?: number, shouldFocus?: boolean): Window;
+  /**
+   * Open a non-modal window above the main window with the given html code and window title.
+   * It returns a promise with the created window object.
+   * Optionally, supply an object as the 3rd parameter to set window options: { width, height, x, y, shouldFocus, id }
+   * By default, it will focus and bring to front the window on first launch.
+   * If you are re-loading an existing HTML window's content, by default the window will not change z-order or focus (if it is in the back, it will stay in the back). You can override this by setting { shouldFocus: true } to bring to front on reload.
+   * Note: from v3.9.6 (build 1087) will open multiple windows if different 'id' is delivered. If set it is assigned as the `customId` to the returning window.
+   * Run it with await window = showWindow(...), so you can adjust the window position and height later.
+   * Note: Available from v3.9.1 (build 1020)
+   * @param {string} HTML to show
+   * @param {string} title for HTML window
+   * @param {Object} options { x: integer, y: integer, width: integer, height: integer, shouldFocus: boolean, id: string }
+   * @returns {Window} promise to window
+   */
+  static showWindowWithOptions(html: string, title: string, options: Object): HTMLView;
   /**
    * Get a unique ID for the window to make it easier to identify it later
    * Note: Available from NotePlan v3.8.1 build 973
    * @returns {string}
    */
   +id: string;
-/**
- * Set / get a custom identifier, so you don't need to cache the unique id.
- * Example: NotePlan.editors[0].customId = "test"
- * Note: Available from NotePlan v3.8.1 build 973
- * @returns {string}
- */
-customId: string;
-/**
- * Get type of window where the window is embedded in. 
- * Possible values: main|split|floating|unsupported
- * It's unsupported on iOS at the moment.
- * Note: Available from NotePlan v3.8.1 build 973
- * @returns {string}
- */
-+type: string;
-/**
- * Send the window to the front.
- * Note: Available from NotePlan v3.8.1 build 973
- */
-focus(): void;
-/**
- * Close the split view or window. If it's the main note, it will close the complete main window.
- * Note: Available from NotePlan v3.8.1 build 973
- */
-close(): void;
   /**
-   * After opening an html window, make changes to the contents of the window by running JS code directly inside the opened window.
+   * Set / get a custom identifier, so you don't need to cache the unique id.
+   * Example: NotePlan.editors[0].customId = "test"
+   * Generally speaking you should start this string with the plugin's ID, e.g. pluginJson['plugin.id'], and append '.name' if you need to have more than 1 HTML window type in the same plugin.
+   * Note: Available from NotePlan v3.8.1 build 973
+   * @returns {string}
+   */
+  customId: string;
+  /**
+   * Get type of window where the window is embedded in.
+   * Possible values: main|split|floating|unsupported
+   * It's unsupported on iOS at the moment.
+   * Note: Available from NotePlan v3.8.1 build 973
+   * @returns {string}
+   */
+  +type: string;
+  /**
+   * Send the window to the front.
+   * Note: Available from NotePlan v3.8.1 build 973
+   */
+  focus(): void;
+  /**
+   * Close the HTML window.
+   * Note: Available from NotePlan v3.8.1 build 973
+   */
+  close(): void;
+  /**
+   * After opening an HTML window, make changes to the contents of the window by running JS code directly inside the opened window.
    * Returns a promise you can wait for with the return value, if any (depends if you added one to the JS code that is supposed to be executed).
-   * Note: Available in v3.8
-   * @param { String }
+   * Note: Available in v3.8. Second parameter added in build 1089.
+   * @param { string } code JS to execute
+   * @param { string } windowId ID of the HTML window to execute it in.
    * @return { Promise | void }
    */
-  static runJavaScript(code: string): Promise | void;
+  static runJavaScript(code: string, windowId: string): Promise | void;
+  /**
+   * Set / get the position and size of an HTMLView window. Returns an object with x, y, width, height values.
+   * If you want to change the coordinates or size, save the rect in a variable, modify the variable, then assign it to windowRect.
+   * The position of the window might not be very intuitive, because the coordinate system of the screen works differently (starts at the bottom left for example). Recommended is to adjust the size and position of the window relatively to it's values or other windows.
+   * Example:
+   *   const rect = HTMLView.windowRect
+   *   rect.height -= 50
+   *   Editor.windowRect = rect
+   *
+   * Note: Available with v3.9.1 build 1020
+   */
+  windowRect: Rect;
 }
+
+/** JGC: I'm not entirely sure about this next line, but Window is some sort of thing. */
+type Window = HTMLView | Editor
 
 type FetchOptions = {
   /* all optional */

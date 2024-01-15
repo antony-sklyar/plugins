@@ -4,7 +4,7 @@
 // by @jgclark, @dwertheimer
 //-----------------------------------------------------------------------------
 
-import { getNPWeekStr, RE_ISO_DATE, RE_NP_WEEK_SPEC, RE_NP_MONTH_SPEC, RE_NP_QUARTER_SPEC, todaysDateISOString, RE_NP_YEAR_SPEC, RE_NP_DAY_SPEC } from '@helpers/dateTime'
+import { getNPWeekStr, RE_ISO_DATE, RE_NP_WEEK_SPEC, RE_NP_MONTH_SPEC, RE_NP_QUARTER_SPEC, todaysDateISOString, RE_NP_YEAR_SPEC } from '@helpers/dateTime'
 import { clo, JSP, logDebug, logError, logInfo } from '@helpers/dev'
 import { RE_MARKDOWN_LINKS_CAPTURE_G, RE_SIMPLE_BARE_URI_MATCH_G, RE_SYNC_MARKER } from '@helpers/regex'
 
@@ -28,16 +28,27 @@ export function convertAllLinksToHTMLLinks(original: string): string {
  * Convert bare URLs to display as HTML links
  * @author @jgclark
  * @tests in jest file
- * @param {string} original
+ * @param {string} original string
+ * @param {boolean?} addWebIcon before the link? (default: true)
+ * @param {boolean?} truncateIfNecessary the display of the link? (default: true)
  */
-export function changeBareLinksToHTMLLink(original: string): string {
+export function changeBareLinksToHTMLLink(original: string, addWebIcon: boolean = true, truncateIfNecessary: boolean = true): string {
   let output = original
   const captures = Array.from(original.matchAll(RE_SIMPLE_BARE_URI_MATCH_G) ?? [])
   if (captures.length > 0) {
     // clo(captures, `${String(captures.length)} results from bare URL matches:`)
     for (const capture of captures) {
       const linkURL = capture[3]
-      output = output.replace(linkURL, `<span class="externalLink"><a href="${linkURL}">${linkURL}</a></span>`)
+      const URLForDisplay = (truncateIfNecessary && linkURL.length > 20)
+        ? linkURL.slice(0, 50) + '...'
+        : linkURL
+      // logDebug('changeBareLinksToHTMLLink', `${linkURL} / ${URLForDisplay}`)
+      if (addWebIcon) {
+        // not displaying icon
+        output = output.replace(linkURL, `<a class="externalLink" href="${linkURL}"><i class="fa-regular fa-globe pad-right"></i>${URLForDisplay}</a>`)
+      } else {
+        output = output.replace(linkURL, `<a class="externalLink" href="${linkURL}">${URLForDisplay}</a>`)
+      }
     }
   }
   return output
@@ -47,9 +58,10 @@ export function changeBareLinksToHTMLLink(original: string): string {
  * Change [title](URI) markdown links to <a href="URI">title</a> HTML style
  * @author @jgclark
  * @tests in jest file
- * @param {string} original
+ * @param {string} original string
+ * @param {boolean?} addWebIcon before the link? (default: true)
  */
-export function changeMarkdownLinksToHTMLLink(original: string): string {
+export function changeMarkdownLinksToHTMLLink(original: string, addWebIcon: boolean = true): string {
   let output = original
   const captures = Array.from(original.matchAll(RE_MARKDOWN_LINKS_CAPTURE_G) ?? [])
   if (captures.length > 0) {
@@ -58,7 +70,12 @@ export function changeMarkdownLinksToHTMLLink(original: string): string {
     for (const capture of captures) {
       const linkTitle = capture[1]
       const linkURL = capture[2]
-      output = output.replace(`[${linkTitle}](${linkURL})`, `<span class="externalLink"><a href="${linkURL}">${linkTitle}</a></span>`)
+      if (addWebIcon) {
+        // not displaying icon
+        output = output.replace(`[${linkTitle}](${linkURL})`, `<a class="externalLink" href="${linkURL}"><i class="fa-regular fa-globe pad-right"></i>${linkTitle}</a>`)
+      } else {
+        output = output.replace(`[${linkTitle}](${linkURL})`, `<a class="externalLink" href="${linkURL}">${linkTitle}</a>`)
+      }
     }
   }
   return output
@@ -96,7 +113,7 @@ export function stripLinksFromString(original: string, leaveLinkText: boolean = 
  */
 export function stripDateRefsFromString(original: string): string {
   let output = original
-  const REGEX = new RegExp(`(>|<)(${RE_NP_DAY_SPEC}|today|${RE_NP_WEEK_SPEC}|${RE_NP_MONTH_SPEC}|${RE_NP_QUARTER_SPEC}|${RE_NP_YEAR_SPEC})`, 'g')
+  const REGEX = new RegExp(`(>|<)(${RE_ISO_DATE}|today|${RE_NP_WEEK_SPEC}|${RE_NP_MONTH_SPEC}|${RE_NP_QUARTER_SPEC}|${RE_NP_YEAR_SPEC})`, 'g')
   const captures = output.match(REGEX) ?? []
   if (captures.length > 0) {
     // clo(captures, `results from >(${todaysDateISOString}|today) match:`)
@@ -236,7 +253,6 @@ export function stripHashtagsFromString(original: string): string {
 export function stripMentionsFromString(original: string): string {
   let output = original
   // Note: the regex from @EduardMe's file is /(\s|^|\"|\'|\(|\[|\{)(?!@[\d[:punct:]]+(\s|$))(@([^[:punct:]\s]|[\-_\/])+?\(.*?\)|@([^[:punct:]\s]|[\-_\/])+)/ but :punct: doesn't work in JS, so here's my simplified version
-  // TODO: matchAll?
   const captures = output.match(/(?:\s|^|\"|\(|\)\')(@[A-Za-z][\w\d\.\-\(\)]*)/g)
   if (captures) {
     clo(captures, 'results from mention matches:')
@@ -293,7 +309,7 @@ export function stripAllTagssFromString(original: string): string {
  * @param {string} original
  * @param {boolean} stripTags - also strip hashtags and mentions
  * @param {boolean} stripLinks - also strip links
- * @returns
+ * @returns {string}
  */
 export function stripAllMarkersFromString(original: string, stripTags: false, stripLinks: false): string {
   /* cleanse clean the string */
@@ -306,8 +322,26 @@ export function stripAllMarkersFromString(original: string, stripTags: false, st
 }
 
 /**
+ * Strip mailto links from the start of email addresses
+ * @param {string} email
+ * @returns {string}
+ */
+export function stripMailtoLinks(email: string): string {
+  return email.replace(/^mailto:/, '')
+}
+
+/**
+ * Convert markdown links to HTML links in 'text' string
+ * @param {string} text
+ * @returns {string}
+ */
+export function convertMarkdownLinks(text: string): string {
+  return text.replace(/\[([^\]]+)\]\(([^\)]+)\)/g, '<a href="$1">$2</a>')
+}
+
+/**
  * Version of URL encode that extends encodeURIComponent()
- * (which everything except A-Z a-z 0-9 - _ . ! ~ * ' ( ))
+ * (which does everything except A-Z a-z 0-9 - _ . ! ~ * ' ( ))
  * plus ! ' ( ) [ ] * required by RFC3986, and needed when passing text to JS in some settings
  * Taken from https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURI#encoding_for_rfc3986
  * @tests in jest file
@@ -315,10 +349,21 @@ export function stripAllMarkersFromString(original: string, stripTags: false, st
  * @returns {string} URL-encoded string
  */
 export function encodeRFC3986URIComponent(input: string): string {
-  return encodeURIComponent(input)
+  // special case that appears in innerHTML
+  const dealWithSpecialCase = input
+    .replace(/&amp;/g, '&')
+    .replace(/&amp%3B/g, '&')
+    .replace(/%26amp;/g, '&')
+    .replace(/%26amp%3B/g, '&')
+  return encodeURIComponent(dealWithSpecialCase)
     .replace(/\[/g, '%5B')
     .replace(/\]/g, '%5D')
-    .replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+    .replace(/!/g, '%21')
+    .replace(/'/g, "%27")
+    .replace(/\(/g, '%28')
+    .replace(/\)/g, '%29')
+    .replace(/\*/g, '%2A')
+    // .replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
 }
 
 /**
@@ -329,7 +374,7 @@ export function encodeRFC3986URIComponent(input: string): string {
  * @returns {string}
  */
 export function decodeRFC3986URIComponent(input: string): string {
-  return decodeURIComponent(input)
+  const decodedSpecials = input
     .replace(/%5B/g, '[')
     .replace(/%5D/g, ']')
     .replace(/%21/g, '!')
@@ -337,4 +382,5 @@ export function decodeRFC3986URIComponent(input: string): string {
     .replace(/%28/g, '(')
     .replace(/%29/g, ')')
     .replace(/%2A/g, '*')
+  return decodeURIComponent(decodedSpecials)
 }

@@ -2,7 +2,7 @@
 //-----------------------------------------------------------------------------
 // Note Helpers plugin for NotePlan
 // Jonathan Clark & Eduard Metzger
-// Last updated 22.3.2023 for v0.16.0 by @jgclark
+// Last updated 30.6.2023 for v0.17.2 by @jgclark
 //-----------------------------------------------------------------------------
 
 import pluginJson from '../plugin.json'
@@ -13,6 +13,7 @@ import { convertNoteToFrontmatter } from '@helpers/NPnote'
 import { addTrigger, TRIGGER_LIST } from '@helpers/NPFrontMatter'
 import { getParaFromContent, findStartOfActivePartOfNote } from '@helpers/paragraph'
 import { chooseFolder, chooseHeading, chooseOption, getInput, showMessage } from '@helpers/userInput'
+
 //-----------------------------------------------------------------
 // Settings
 
@@ -22,6 +23,9 @@ export type noteHelpersConfigType = {
   dateDisplayType: string,
   defaultFMText: string, // default text to add to frontmatter.
   displayOrder: string,
+  ignoreCompletedItems: boolean,
+  includeSubfolders: boolean,
+  indexTitle: string,
 }
 
 /**
@@ -61,7 +65,7 @@ export async function moveNote(): Promise<void> {
       logError('moveNote()', 'No note open. Stopping.')
       return
     }
-    const selectedFolder = await chooseFolder(`Select a folder for '${title}'`, true) // include @Archive as an option
+    const selectedFolder = await chooseFolder(`Select a folder for '${title}'`, true, true) // include @Archive as an option, and to create a new folder
     logDebug('moveNote()', `move ${title} (filename = ${filename}) to ${selectedFolder}`)
 
     const newFilename = DataStore.moveNote(filename, selectedFolder)

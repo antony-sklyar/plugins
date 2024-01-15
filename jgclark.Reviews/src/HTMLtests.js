@@ -3,8 +3,9 @@
 // Tests for various HTML developments
 //-------------------------------------------------------
 
-import { generateCSSFromTheme, makeSVGPercentRing, redToGreenInterpolation, showHTML } from '@helpers/HTMLView'
-import { reviewListCSS, setPercentRingJSFunc } from './projectLists'
+import { makeSVGPercentRing, redToGreenInterpolation, showHTML } from '@helpers/HTMLView'
+import { generateCSSFromTheme } from '@helpers/NPThemeToCSS'
+import { setPercentRingJSFunc } from './reviews'
 
 export function testGenerateCSSFromTheme(): void {
   let themeName = ''
@@ -18,9 +19,9 @@ export function testGenerateCSSFromTheme(): void {
 /**
  * Show progress circle, just using HTML and CSS
  * Adapted by @jgclark from https://codeconvey.com/css-percentage-circle/
- * 
+ *
  * Positives: This works in NP!
- * Negatives: 
+ * Negatives:
   - Not set up well to adapt to changing sizes
   - Doesn't work as is for more than one circle on the page
  */
@@ -29,11 +30,14 @@ export function testCSSCircle(): void {
   HTMLView.showWindow(CSSCircleHTML, 'CSS Circle test', 300, 300)
 }
 
+const faLinksInHeader = `<link href="../requiredFiles/projectList.css" rel="stylesheet">
+`
+
 const CSSCircleHTML = `
 <html>
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"> 
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pure CSS Percentage Circle Demo</title>
 
 <style type="text/css" />
@@ -49,7 +53,7 @@ body {
   width: 3rem;
   height: 3rem;
   background: #e6e2e7;
-  border-radius: 50%; 
+  border-radius: 50%;
 }
 
 .circle-wrap .circle .mask,
@@ -131,10 +135,10 @@ export function testRedToGreenInterpolation(): void {
   }
   showHTML(
     'Red to Green test',
-    '',
+    faLinksInHeader,
     body,
     '',
-    reviewListCSS,
+    '', // reviewListCSS is now in requiredFiles/projectList.css
     false, // not modal
     setPercentRingJSFunc,
     '',

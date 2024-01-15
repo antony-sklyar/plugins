@@ -4,6 +4,53 @@ README: [How to use AutoTimeBlocking](https://noteplan.co/n/#/1EF12392-B544-4044
 
 ## What's New in AutoTimeBlocking
 
+## [1.18.1] 2024-01-04 @dwertheimer
+
+- Update language around Synced Copies preference (thanks @dutcheness)
+- Fix bug where synced copies didn't write if the Editor was not saved yet
+
+
+## [1.18.0] 2023-10-16 @dwertheimer
+
+- Add Named Timeblocks Mode (BY_TIMEBLOCK_TAG mode)
+- Minor calendar event improvement to deal with "today" and "tomorrow" text better in event creation
+
+
+## [1.17.3] 2023-10-11 @dwertheimer
+
+- EventBlocks: minor change to xcallback support]
+## [1.17.2] 2023-09-16 @dwertheimer
+
+- EventBlocks - work around NP limitation that doesn't process "today at 5pm" correctly
+
+## [1.17.1] 2023-09-06 @dwertheimer 2023-09-06
+
+- Add argument for heading to put it under
+
+## [1.17.0] 2023-09-06 @dwertheimer 2023-09-06
+
+- Add interactive plugin settings for iOS
+- Added /pevt command for creating a single task using natural language
+
+## [1.16.3] 2023-08-24
+
+- Fix bug where synced lines in today's note were not being timeblocked. Thx @tiffsunbacon
+
+## [1.16.2] 2023-07-13
+
+- Fix bug in non-ATB timeblocks getting deleted
+- Allow time to be '1hr or '5min instead of just "h" and "m"
+
+## [1.16.1] 2023-07-05 @dwertheimer
+
+- bump to chase onSettingsUpdated NP bug
+
+## [1.16.0] 2023-07-05 @dwertheimer
+
+- Create Tasks within named Timeblocks (e.g. #home) - aka BY_TIMEBLOCK_TAG mode (see the README ^^^)
+- Change Plugin Name to AutoTimeBlocking/Events
+- Add output/notification for tasks that were unable to fit
+
 ## [1.15.1] 2023-04-20
 
 - Fix bug in tasks open in today's note.
@@ -116,7 +163,9 @@ README: [How to use AutoTimeBlocking](https://noteplan.co/n/#/1EF12392-B544-4044
 - Remove the requirement for Synced lines to run only on today's note (@Stacey's suggestion)
 
 - added: added command "/Insert Synced Today Todos at Cursor" to add synced lines without timeblocks
+
 ## [1.2.0] 2022-07-10 @dwertheimer
+
 - added: added command "/Insert Synced Today Todos at Cursor" to add synced lines without timeblocks
 - changed plugin name to "AutoTimeBlocking & Synced Today Todos"
 

@@ -1,5 +1,5 @@
 {
-  "noteplan.minAppVersion": "3.3.2",
+  "noteplan.minAppVersion": "3.9.1",
   "macOS.minVersion": "10.13.0",
   "plugin.id": "jgclark.Reviews",
   "plugin.name": "🔬 Projects + Reviews",
@@ -8,9 +8,11 @@
   "plugin.author": "Jonathan Clark",
   "plugin.url": "https://github.com/NotePlan/plugins/tree/main/jgclark.Reviews",
   "plugin.changelog": "https://github.com/NotePlan/plugins/blob/main/jgclark.Reviews/CHANGELOG.md",
-  "plugin.version": "0.9.4",
-  "plugin.lastUpdateInfo": "0.9.4: fixes and smarter window management.\n0.9.3: fixes.\n0.9.2: date fixes, locale language used where possible, tool tips & other polish.\n0.9.1: Fixed projects due today not being offered for review.\n0.9.0: Major speed up of most '/project list' calls, and can now write both Rich and Markdown outputs at the same time. Lots of other layout improvements too.",
-  "plugin.requiredFiles": [],
+  "plugin.version": "0.13.0",
+  "plugin.lastUpdateInfo": "0.13.0: add option to archive completed/cancelled projects using existing folder structure.\n0.12.5: now can include files in root folder. When you refresh project list it will keep scroll position.\n0.12.4: bug fixes.\n0.12.3: small improvements, and ready for NP v3.9.6.\n0.12.2: bug fix\n0.12.1: under-the-hood change to help Dashboard plugin.\n0.12.0: More flexible 'Progress:' lines, and new button to make it easier to write them. Can now edit settings on iOS.\n0.11.1: window size and position should now be reused. Added 'add progress line' command.",
+  "plugin.requiredFiles": [
+    "projectList.css"
+  ],
   "plugin.requiredSharedFiles": [
     "fontawesome.css",
     "regular.min.flat4NP.css",
@@ -30,7 +32,8 @@
       "description": "creates/updates a human-readable list of project notes, including basic tasks statistics and time until next review, and time until the project is due to complete.",
       "jsFunction": "makeProjectLists",
       "arguments": [
-        "comma-separated list of setting keys and their values"
+        "comma-separated list of setting keys and their values (optional)",
+        "position to scroll window to (optional, only for HTML view)"
       ]
     },
     {
@@ -57,7 +60,16 @@
         "review"
       ],
       "description": "updates this project's @reviewed() date, and jump to next project to review",
-      "jsFunction": "nextReview"
+      "jsFunction": "finishReviewAndStartNextReview"
+    },
+    {
+      "name": "skip project review",
+      "alias": [
+        "gtd",
+        "review"
+      ],
+      "description": "skip this review, add a @nextReview() date, and jump to next project to review",
+      "jsFunction": "skipReview"
     },
     {
       "name": "pause project toggle",
@@ -90,6 +102,33 @@
       "jsFunction": "cancelProject"
     },
     {
+      "name": "add progress update",
+      "alias": [
+        "apu",
+        "progress",
+        "percent"
+      ],
+      "description": "prompts for a short description and percentage completion number for the open project note, and writes it to the metadata area of the note",
+      "jsFunction": "addProgressUpdate"
+    },
+    {
+      "hidden": true,
+      "name": "toggleDisplayOnlyOverdue",
+      "description": "callback entry point for toggleShowOnlyOverdue",
+      "jsFunction": "toggleDisplayOnlyOverdue"
+    },
+    {
+      "hidden": true,
+      "name": "toggleDisplayFinished",
+      "description": "callback entry point for toggleDisplayFinished",
+      "jsFunction": "toggleDisplayFinished"
+    },
+    {
+      "name": "Projects: update plugin settings",
+      "description": "Settings interface (even for iOS)",
+      "jsFunction": "updateSettings"
+    },
+    {
       "name": "test:logFullReviewList",
       "description": "write full-review-list file to log",
       "jsFunction": "logFullReviewList"
@@ -105,9 +144,9 @@
       "jsFunction": "redisplayProjectListHTML"
     },
     {
-      "name": "test:renderProjectLists",
-      "description": "Render project lists (without recalc)",
-      "jsFunction": "renderProjectLists"
+      "name": "test:updateSettings",
+      "description": "Test for update of settings",
+      "jsFunction": "testSettingsUpdated"
     }
   ],
   "plugin.inactiveCommands": [
@@ -155,12 +194,17 @@
       "name": "test:buttonTriggerOpenNote",
       "description": "test Button Trigger OpenNote",
       "jsFunction": "testButtonTriggerOpenNote"
+    },
+    {
+      "name": "test:setWindowHeight",
+      "description": "set height of HTML Window",
+      "jsFunction": "setHTMLWinHeight"
     }
   ],
   "plugin.settings": [
     {
       "type": "heading",
-      "title": "Review Plugin settings"
+      "title": "Project + Reviews main settings"
     },
     {
       "key": "outputStyle",
@@ -192,12 +236,22 @@
         "#area",
         "#project"
       ],
-      "required": true
+      "required": false
+    },
+    {
+      "key": "foldersToInclude",
+      "title": "Folders to use in reviews",
+      "description": "Specify which folders to include (which includes any of their sub-folders) as a comma-separated list. This match is done anywhere in the folder name, so you could simply say `Project` which would match for `Client A/Projects` as well as `Client B/Projects`.\nIf empty, all folders will be processed (apart from the special @Trash, @Templates and @Archive foldeers which are always excluded.)",
+      "type": "[string]",
+      "default": [
+        "Projects"
+      ],
+      "required": false
     },
     {
       "key": "foldersToIgnore",
       "title": "Folders to ignore in reviews",
-      "description": "A comma-separated list of folders to ignore in reviews. Can be empty. Where an ignored folder has a sub-folder these will also be ignored. (Note that @Trash, @Templates and @Archive are always excluded.)",
+      "description": "Specify folders to ignore (which includes any of their sub-folders too) as a comma-separated list. This match is also done anywhere in the folder name. Can be empty. (Note that @Trash, @Templates and @Archive are always excluded.)",
       "type": "[string]",
       "default": [
         "Reviews",
@@ -216,23 +270,7 @@
     },
     {
       "type": "heading",
-      "title": "Settings for '/project lists' command"
-    },
-    {
-      "key": "displayDates",
-      "title": "Display project dates?",
-      "description": "Whether to display the project's review and due dates (where set)",
-      "type": "bool",
-      "default": true,
-      "required": true
-    },
-    {
-      "key": "displayProgress",
-      "title": "Display project's latest progress?",
-      "description": "Whether to show the project's latest progress (where available). If a specific 'Progress:' field is set it will use that, otherwise it will calculate %completion based on the number of completed and open tasks.",
-      "type": "bool",
-      "default": true,
-      "required": true
+      "title": "Display settings for 'project lists' command"
     },
     {
       "key": "displayOrder",
@@ -258,21 +296,82 @@
     {
       "key": "hideTopLevelFolder",
       "title": "Hide top-level folder in output?",
-      "description": "If 'Display projects grouped by folder?' above is set, this hides all but the lowest-level subfolder name in output.",
+      "description": "If 'Display projects grouped by folder?' (above) is set, this hides all but the lowest-level subfolder name in output.",
       "type": "bool",
       "default": false,
       "required": true
     },
     {
+      "key": "displayFinished",
+      "title": "How to show completed/cancelled projects?",
+      "description": "If you do not want to see completed/cancelled projects in your Rich dashboard, change this setting to something other than Displayed.",
+      "type": "string",
+      "default": "display at end",
+      "required": true,
+      "choices": [
+        "display",
+        "display at end",
+        "hide"
+      ]
+    },
+    {
+      "key": "displayOnlyOverdue",
+      "title": "Only display overdue projects/areas?",
+      "description": "If not ticked then it will display all project/area notes, not just overdue ones.",
+      "type": "bool",
+      "default": false,
+      "required": true
+    },
+    {
+      "key": "displayDates",
+      "title": "Display project dates?",
+      "description": "Whether to display the project's review and due dates (where set).",
+      "type": "bool",
+      "default": true,
+      "required": true
+    },
+    {
+      "key": "displayProgress",
+      "title": "Display project's latest progress?",
+      "description": "Whether to show the project's latest progress (where available). If a specific 'Progress:' field is set it will use that, otherwise it will calculate %completion based on the number of completed and open tasks.",
+      "type": "bool",
+      "default": true,
+      "required": true
+    },
+    {
+      "key": "width",
+      "title": "Window width",
+      "description": "Width of the Review List window (pixels)",
+      "type": "hidden",
+      "default": 800,
+      "required": true
+    },
+    {
+      "key": "height",
+      "title": "Window height",
+      "description": "Height of the Review List window (pixels)",
+      "type": "hidden",
+      "default": 1200,
+      "required": true
+    },
+    {
       "type": "heading",
-      "title": "Setting for /completeProject and /cancelProject"
+      "title": "Settings for 'completeProject' and 'cancelProject' commands"
     },
     {
       "key": "finishedListHeading",
       "title": "Finished List Heading",
-      "description": "Heading of list of completed or cancelled projects/areas",
+      "description": "Heading of list of completed or cancelled projects/areas in the yearly note",
       "type": "string",
       "default": "Finished Projects/Areas",
+      "required": true
+    },
+    {
+      "key": "archiveUsingFolderStructure",
+      "title": "Archive using folder structure?",
+      "description": "When you complete or cancel a project, and you opt to move it to the Archive, if set this will replicating the project note's existing folder structure inside the Archive.\n(This is the same thing that the Filer plugin's \"/archive note using folder structure\" command does, though Filer does not need to be installed to use this.)",
+      "type": "bool",
+      "default": true,
       "required": true
     },
     {
@@ -282,7 +381,7 @@
     {
       "key": "startMentionStr",
       "title": "Project start string",
-      "description": "@string indicating date a project/area was started (default: @start)",
+      "description": "@string indicating date a project/area was started (default: '@start')",
       "type": "string",
       "default": "@start",
       "required": true
@@ -290,7 +389,7 @@
     {
       "key": "completedMentionStr",
       "title": "Project completed string",
-      "description": "@string indicating date a project/area was completed (default: @completed)",
+      "description": "@string indicating date a project/area was completed (default: '@completed')",
       "type": "string",
       "default": "@completed",
       "required": true
@@ -298,7 +397,7 @@
     {
       "key": "cancelledMentionStr",
       "title": "Project cancelled string",
-      "description": "@string indicating date a project/area was cancelled (default: @cancelled)",
+      "description": "@string indicating date a project/area was cancelled (default: '@cancelled')",
       "type": "string",
       "default": "@cancelled",
       "required": true
@@ -306,7 +405,7 @@
     {
       "key": "dueMentionStr",
       "title": "Project due string",
-      "description": "@string indicating date a project/area is due to be finished (default: @due)",
+      "description": "@string indicating date a project/area is due to be finished (default: '@due')",
       "type": "string",
       "default": "@due",
       "required": true
@@ -314,7 +413,7 @@
     {
       "key": "reviewIntervalMentionStr",
       "title": "Project review interval string",
-      "description": "@string indicating review interval for project/area (default: @review)",
+      "description": "@string indicating review interval for project/area (default: '@review')",
       "type": "string",
       "default": "@review",
       "required": true
@@ -322,9 +421,17 @@
     {
       "key": "reviewedMentionStr",
       "title": "Project reviewed string",
-      "description": "@string indicating date a project/area was last reviewed (default: @reviewed)",
+      "description": "@string indicating date a project/area was last reviewed (default: '@reviewed')",
       "type": "string",
       "default": "@reviewed",
+      "required": true
+    },
+    {
+      "key": "nextReviewMentionStr",
+      "title": "Project next review string",
+      "description": "@string indicating date you next want a project/area to be reviewed (default: '@nextReview')",
+      "type": "string",
+      "default": "@nextReview",
       "required": true
     },
     {

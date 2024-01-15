@@ -3,7 +3,7 @@ This plugin helps you write daily, weekly, monthly, quarterly and/or yearly **jo
 
 This takes advantage of each of these time periods that can be turned on in Preferences > Calendars, and then show in the sidebar:
 
-<img width="500px" src="calendar-notes@2x.jpg">
+<img width="500px" src="calendar-notes@2x.jpg" />
 
 The commands are:
 - **/dayStart**: Apply your 'Daily Note' Template to the currently open daily note (or today's note if you're not editing a daily note)
@@ -12,6 +12,7 @@ The commands are:
 - **/monthStart**: Apply your 'Monthly Note' Template to the currently open monthly note (or the current monthly note if you're not editing a monthly note)
 - **/dayReview**: Ask journal questions for an end-of-day review, and write answers in the current daily note. See below for details and examples.
 - **/weekReview**, **/monthReview**, **/quarterReview** and **/yearReview** all work similarly, asking the appropriately-configured journal questions, and write answers in the currently-open week/month/quarter/year note for that period, or if one of those isn't open, then offers to open the current note for that period.
+- **/Journalling: update plugin settings**: This command allows the plugin's settings to be changed on iOS/iPadOS.
 
 Note: the monthly/quarterly/yearly commands only work fully from NotePlan release 3.7.2.
 
@@ -23,9 +24,9 @@ These commands require the separate [Templating plugin](https://github.com/NoteP
 
 They then use your pre-set Template name stored in the special NotePlan `Templates` folder. By default this is set to `Daily Note Template`.
 
-The NotePlan website has good [articles on getting started with Templates](https://help.noteplan.co/article/136-templates). For more details of the tag commands you can use in a Template, including a list of events, a quote-of-the-day or summary weather forecast, see the [Templating Getting Started](https://nptemplating-docs.netlify.app/docs/templating-basics/getting-started). 
+The NotePlan website has good [articles on getting started with Templates](https://help.noteplan.co/article/136-templates). For more details of the tag commands you can use in a Template, including a list of events, a quote-of-the-day or summary weather forecast, see the [Templating Getting Started](https://nptemplating-docs.netlify.app/docs/templating-basics/getting-started).
 
-NB: Be careful with `/dayStart` in another calendar note than today using template tag commands like `<%- date... / formattedDate... %>` or `<%- weather() %>` -> because this renders the TODAY content!  
+NB: Be careful with `/dayStart` in another calendar note than today using template tag commands like `<%- date... / formattedDate... %>` or `<%- weather() %>` -> because this renders the TODAY content!
 
 ### /dayReview, /weekReview, /monthReview, /quarterReview, and /yearReview
 You first need to configure the sets of questions to ask, though a default set is provided to get you started.
@@ -56,12 +57,12 @@ These strings include both the questions and how to lay out the answers in the w
 A comma-separated list of possible moods to select from.  They don't have to have emoji, but I rather like them.
 
 ## /dayReview Example
-The following `reviewQuestions` string:  
+The following `reviewQuestions` string:
 ```
 @work(<int>)\n@fruitveg(<int>)\nMood: <mood>\nThoughts <subheading>\n- (Thought 1/3) <string>\n- (Thought 2/3) <string>\n
 - (Thought 3/3) <string>\nGratitude <subheading>\n- (Gratitude 1/3) <string>\n- (Gratitude 2/3) <string>\n- (Gratitude 3/3) <string>\n
 ```
-would produce, after answering the questions, like this in today's note:  
+would produce, after answering the questions, like this in today's note:
 
 ```markdown
 ## Journal
@@ -85,7 +86,7 @@ If you find an issue with this plugin, or would like to suggest new features for
 
 If you would like to support my late-night work extending NotePlan through writing these plugins, you can through:
 
-[<img width="200px" alt="Buy Me A Coffee" src="https://www.buymeacoffee.com/assets/img/guidelines/download-assets-sm-2.svg">](https://www.buymeacoffee.com/revjgc)
+[<img width="200px" alt="Buy Me A Coffee" src="https://www.buymeacoffee.com/assets/img/guidelines/download-assets-sm-2.svg" />](https://www.buymeacoffee.com/revjgc)
 
 Thanks!
 

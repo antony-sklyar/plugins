@@ -3,7 +3,7 @@
 //-----------------------------------------------------------------------------
 // Quick Capture plugin for NotePlan
 // Jonathan Clark
-// Last updated 23.3.23 for v0.13.0, @jgclark
+// Last updated 1.9.23 for v0.15.0, @jgclark
 //-----------------------------------------------------------------------------
 
 // allow changes in plugin.json to trigger recompilation
@@ -21,6 +21,8 @@ export {
   appendTaskToWeeklyNote,
   appendTextToDailyJournal,
   appendTextToWeeklyJournal,
+  appendTextToMonthlyJournal,
+  appendTextToYearlyJournal,
   prependTaskToCalendarNote,
   appendTaskToNote,
   prependTaskToNote
@@ -42,14 +44,14 @@ export function init(): void {
   }
 }
 
-export function onSettingsUpdated(): void {
+export async function onSettingsUpdated(): Promise<void> {
   // Placeholder only to stop error in logs
 }
 
 export async function onUpdateOrInstall(): Promise<void> {
   try {
     // Tell user the plugin has been updated
-    if (pluginJson['plugin.lastUpdateInfo'] !== 'undefined') {
+    if (pluginJson['plugin.lastUpdateInfo'] !== undefined) {
       await showMessage(pluginJson['plugin.lastUpdateInfo'], 'OK, thanks', `Plugin ${pluginJson['plugin.name']}\nupdated to v${pluginJson['plugin.version']}`)
     }
   } catch (error) {
@@ -77,9 +79,10 @@ export async function updateSettings() {
  * Assumes a note titled 'Quick Capture qalh TEST'
  */
 export function tempAddParaTest(): void {
-  const note: TNote = DataStore.projectNoteByTitle('Quick Capture qalh TEST', false, false)[0]
+  // $FlowIgnore[incompatible-use]
+  const note: TNote = DataStore.projectNoteByTitle('Quick Capture callback TESTs', false, false)[0]
   note.addParagraphBelowHeadingTitle(
-    "test_text_addeed_below_heading",
+    "test_text_addeed_below_heading by tempAddParaTest()",
     'text',
     'Head C',
     true,

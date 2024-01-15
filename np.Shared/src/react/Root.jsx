@@ -30,7 +30,7 @@ import { ErrorFallback } from './ErrorFallback.jsx'
 // color this component's output differently in the console
 const consoleStyle = 'background: #222; color: #62AFEC'
 const logDebug = (msg, ...args) => console.log(`${window.webkit ? '' : '%c'}${msg}`, consoleStyle, ...args)
-const logSubtle = (msg, ...args) => console.log(`%c${msg}`, 'color: #6D6962', ...args)
+const logSubtle = (msg, ...args) => console.log(`${window.webkit ? '' : '%c'}${msg}`, 'color: #6D6962', ...args)
 const logTemp = (msg, ...args) => console.log(`${window.webkit ? '' : '%c'}${msg}`, 'background: #fff; color: #000', ...args)
 
 const ROOT_DEBUG = false
@@ -103,20 +103,35 @@ export function Root(props: Props): Node {
   }
 
   /**
+   * Ignore messages that have nothing to do with the plugin
+   * @param {Event} event
+   * @returns {boolean}
+   */
+  const shouldIgnoreMessage = (event) => {
+    const { origin, source, data } = event
+    // logDebug(
+    //   `Root: shouldIgnoreMessage origin=${origin} source=${source} data=${JSON.stringify(data)} data.source=${
+    //     data?.source
+    //   } /react-devtools/.test(data?.source=${/react-devtools/.test(data?.source)}}`,
+    // )
+    return (typeof data === 'string' && data?.startsWith('setImmediate$')) || (typeof data === 'object' && data?.hasOwnProperty('iframeSrc')) || /react-devtools/.test(data?.source)
+  }
+
+  /**
    * This is effectively a reducer we will use to process messages from the plugin
    * And also from components down the tree, using the dispatch command
    */
   const onMessageReceived = (event: MessageEvent | { data: { type: string, payload: any } }) => {
-    const { origin, source, data } = event
-    if (data && !(typeof data === 'string' && data.startsWith('setImmediate$')) && !data.iframeSrc) {
-      const str = JSON.stringify(event, null, 4)
+    const { data } = event
+    if (!shouldIgnoreMessage(event) && data) {
+      // const str = JSON.stringify(event, null, 4)
       try {
         // $FlowFixMe
         const { type, payload } = event.data // remember: event is on prototype and not JSON.stringify-able
         if (!type) throw (`onMessageReceived: event.data.type is undefined`, event.data)
         if (!payload) throw (`onMessageReceived: event.data.payload is undefined`, event.data)
         if (type && payload) {
-          logDebug(`Root: onMessageReceived: ${type}`)
+          logDebug(`Root: onMessageReceived: ${type} payload:${JSON.stringify(payload, null, 2)}`)
           // Spread existing state into new object to keep it immutable
           // TODO: ideally, you would use a reducer here
           if (type === 'SHOW_BANNER') payload.lastUpdated.msg += `: ${payload.msg}`
@@ -158,7 +173,7 @@ export function Root(props: Props): Node {
           logDebug(`Root: onMessageReceived: called but event.data.type and/or event.data.payload is undefined`, event)
         }
       } catch (error) {
-        logDebug('Root: onMessageReceived: error=' + JSON.stringify(error) + 'error=' + JSON.stringify(error))
+        logDebug(`Root: onMessageReceived: error=${JSON.stringify(error)}error=${JSON.stringify(error)}`)
       }
     } else {
       // logDebug(`Root: onMessageReceived: called but event.data is undefined: noop`)
@@ -175,8 +190,9 @@ export function Root(props: Props): Node {
    */
   const sendToPlugin = React.useCallback((args) => {
     const returnPluginCommand = globalSharedData.returnPluginCommand || 'undefined'
-    if (returnPluginCommand === 'undefined' || !returnPluginCommand?.command || !returnPluginCommand?.id)
+    if (returnPluginCommand === 'undefined' || !returnPluginCommand?.command || !returnPluginCommand?.id) {
       throw 'returnPluginCommand variable is not passed correctly to set up comms bridge. Check your data object which you are sending to invoke React'
+    }
     if (!returnPluginCommand?.command) throw 'returnPluginCommand.cmd is not defined in the intial data passed to the plugin'
     if (!returnPluginCommand?.id) throw 'returnPluginCommand.id is not defined in the intial data passed to the plugin'
     const { command, id } = returnPluginCommand // this comes from the initial data passed to the plugin
@@ -208,7 +224,7 @@ export function Root(props: Props): Node {
     // send some info to the plugin
     // first param is the action type and the rest are data (can be any form you want)
     // data.foo = 'bar'
-    sendMessageToPlugin(['commsBridgeTest', 'drink green', 'tea'])
+    sendMessageToPlugin(['commsBridgeTest', 'some sample', 'data passed'])
   }
 
   /**
@@ -269,8 +285,7 @@ export function Root(props: Props): Node {
 
         {(ROOT_DEBUG || debug) && (
           <React.StrictMode>
-            <div onClick={() => dispatch('SHOW_BANNER', { msg: 'Banner test succeeded' }, `banner test`)}>Local Banner Display Test</div>
-            <div onClick={testCommsBridge}>Test Communication Bridge</div>
+            <div className="w3-container w3-red w3-margin-top">Debugging Data (Plugin passed debug:true at window open)</div>
             <div>
               <span id="debugHistory">History (most recent first):</span>
               <ul>
@@ -283,8 +298,13 @@ export function Root(props: Props): Node {
                     </li>
                   ))}
               </ul>
-              <div className="monospaceData">overdue paras: {JSON.stringify(globalSharedData.overdueParas, null, 2)}</div>
               <div className="monospaceData">globalSharedData: {JSON.stringify(globalSharedData, null, 2)}</div>
+            </div>
+            <div className="w3-button w3-black" onClick={() => dispatch('SHOW_BANNER', { msg: 'Banner test succeeded' }, `banner test`)}>
+              Local Banner Display Test
+            </div>
+            <div className="w3-button w3-black" onClick={testCommsBridge}>
+              Test Communication Bridge
             </div>
           </React.StrictMode>
         )}

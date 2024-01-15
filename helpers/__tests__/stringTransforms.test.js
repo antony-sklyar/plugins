@@ -35,15 +35,20 @@ describe(`${PLUGIN_NAME}`, () => {
       const result = st.changeMarkdownLinksToHTMLLink(input)
       expect(result).toEqual(input)
     })
-    test('should produce HTML link 1', () => {
+    test('should produce HTML link 1 without icon', () => {
+      const input = 'this has [text](brackets) with a valid link'
+      const result = st.changeMarkdownLinksToHTMLLink(input, false)
+      expect(result).toEqual('this has <a class="externalLink" href="brackets">text</a> with a valid link')
+    })
+    test('should produce HTML link 1 with icon', () => {
       const input = 'this has [text](brackets) with a valid link'
       const result = st.changeMarkdownLinksToHTMLLink(input)
-      expect(result).toEqual('this has <span class="externalLink"><a href="brackets">text</a></span> with a valid link')
+      expect(result).toEqual('this has <a class="externalLink" href="brackets"><i class="fa-regular fa-globe pad-right"></i>text</a> with a valid link')
     })
     test('should produce HTML link 2', () => {
       const input = 'this has [title with spaces](https://www.something.com/with?various&chars%20ok) with a valid link'
       const result = st.changeMarkdownLinksToHTMLLink(input)
-      expect(result).toEqual('this has <span class="externalLink"><a href="https://www.something.com/with?various&chars%20ok">title with spaces</a></span> with a valid link')
+      expect(result).toEqual('this has <a class="externalLink" href="https://www.something.com/with?various&chars%20ok"><i class="fa-regular fa-globe pad-right"></i>title with spaces</a> with a valid link')
     })
   })
 
@@ -65,17 +70,33 @@ describe(`${PLUGIN_NAME}`, () => {
       const result = st.changeBareLinksToHTMLLink(input)
       expect(result).toEqual('this has [a valid MD link](https://www.something.com/with?various&chars%20ok)')
     })
-    test('should produce HTML link 1', () => {
-      const input = 'this has a https://www.something.com/with?various&chars%20ok valid bare link'
-      const result = st.changeBareLinksToHTMLLink(input)
+    test('should produce HTML link 1 with icon and no truncation', () => {
+      const input = 'this has a https://www.something.com/with?various&chars%20ok/~/and/yet/more/things-to-make-it-really-quite-long valid bare link'
+      const result = st.changeBareLinksToHTMLLink(input, true, false)
       expect(result).toEqual(
-        'this has a <span class="externalLink"><a href="https://www.something.com/with?various&chars%20ok">https://www.something.com/with?various&chars%20ok</a></span> valid bare link',
-      )
+        'this has a <a class="externalLink" href="https://www.something.com/with?various&chars%20ok/~/and/yet/more/things-to-make-it-really-quite-long"><i class="fa-regular fa-globe pad-right"></i>https://www.something.com/with?various&chars%20ok/~/and/yet/more/things-to-make-it-really-quite-long</a> valid bare link')
+    })
+    test('should produce HTML link 1 with icon and truncation', () => {
+      const input = 'this has a https://www.something.com/with?various&chars%20ok/~/and/yet/more/things-to-make-it-really-quite-long valid bare link'
+      const result = st.changeBareLinksToHTMLLink(input, true, true)
+      expect(result).toEqual(
+        'this has a <a class="externalLink" href="https://www.something.com/with?various&chars%20ok/~/and/yet/more/things-to-make-it-really-quite-long"><i class="fa-regular fa-globe pad-right"></i>https://www.something.com/with?various&chars%20ok/...</a> valid bare link')
+    })
+    test('should produce HTML link 1 without icon', () => {
+      const input = 'this has a https://www.something.com/with?various&chars%20ok valid bare link'
+      const result = st.changeBareLinksToHTMLLink(input, false, false)
+      expect(result).toEqual(
+        'this has a <a class="externalLink" href="https://www.something.com/with?various&chars%20ok">https://www.something.com/with?various&chars%20ok</a> valid bare link')
     })
     test('should produce HTML link when a link takes up the whole line', () => {
       const input = 'https://www.something.com/with?various&chars%20ok'
-      const result = st.changeBareLinksToHTMLLink(input)
-      expect(result).toEqual('<span class="externalLink"><a href="https://www.something.com/with?various&chars%20ok">https://www.something.com/with?various&chars%20ok</a></span>')
+      const result = st.changeBareLinksToHTMLLink(input, true, false)
+      expect(result).toEqual('<a class="externalLink" href="https://www.something.com/with?various&chars%20ok"><i class="fa-regular fa-globe pad-right"></i>https://www.something.com/with?various&chars%20ok</a>')
+    })
+    test('should produce HTML link when a link takes up the whole line', () => {
+      const input = 'https://www.something.com/with?various&chars%20ok'
+      const result = st.changeBareLinksToHTMLLink(input, true, false)
+      expect(result).toEqual('<a class="externalLink" href="https://www.something.com/with?various&chars%20ok"><i class="fa-regular fa-globe pad-right"></i>https://www.something.com/with?various&chars%20ok</a>')
     })
   })
 
@@ -270,6 +291,18 @@ describe(`${PLUGIN_NAME}`, () => {
         const result = st.encodeRFC3986URIComponent(input)
         expect(result).toEqual(expected)
       })
+      test('should deal with innerHTML partial encoding of &amp;', () => {
+        const input = ' &amp; %26amp%3B &amp%3B %26amp; &amp; '
+        const expected = '%20%26%20%26%20%26%20%26%20%26%20'
+        const result = st.encodeRFC3986URIComponent(input)
+        expect(result).toEqual(expected)
+      })
+      test('should encode accents in text', () => {
+        const input = 'aàáâäæãåāeèéêëēėęiîíoôölł'
+        const expected = 'a%C3%A0%C3%A1%C3%A2%C3%A4%C3%A6%C3%A3%C3%A5%C4%81e%C3%A8%C3%A9%C3%AA%C3%AB%C4%93%C4%97%C4%99i%C3%AE%C3%ADo%C3%B4%C3%B6l%C5%82'
+        const result = st.encodeRFC3986URIComponent(input)
+        expect(result).toEqual(expected)
+      })
     })
 
     /*
@@ -288,17 +321,35 @@ describe(`${PLUGIN_NAME}`, () => {
         const result = st.decodeRFC3986URIComponent(input)
         expect(result).toEqual(expected)
       })
-      test('should encode standard punctuation', () => {
+      test('should decode standard punctuation', () => {
         const input = '%22%23%25%26%2A%2B%2C%2F%3A%3B%3C%3D%3E%3F%40%5C%5E%60%7B%7C%7D'
         const expected = '"#%&*+,/:;<=>?@\\^`{|}'
         const result = st.decodeRFC3986URIComponent(input)
         expect(result).toEqual(expected)
       })
-      test('should encode additional punctuation', () => {
+      test('should decode additional punctuation', () => {
         const input = '%21%28%29%5B%5D%2A%27'
         const expected = '!()[]*\''
         const result = st.decodeRFC3986URIComponent(input)
         expect(result).toEqual(expected)
+      })
+      test('should decode accents in text', () => {
+        const input = 'a%C3%A0%C3%A1%C3%A2%C3%A4%C3%A6%C3%A3%C3%A5%C4%81e%C3%A8%C3%A9%C3%AA%C3%AB%C4%93%C4%97%C4%99i%C3%AE%C3%ADo%C3%B4%C3%B6l%C5%82'
+        const expected = 'aàáâäæãåāeèéêëēėęiîíoôölł'
+        const result = st.decodeRFC3986URIComponent(input)
+        expect(result).toEqual(expected)
+      })
+    })
+
+    describe('encode...-decode... match tests', () => {
+      test('long string from DW', () => {
+        const input = `'5m[CommandBar](noteplan://x-callback-url/runPlugin?pluginID=dwertheimer.TaskAutomations&command=Review%20overdue%20tasks%20%28by%20Task%29) > [React](noteplan://x-callback-url/runPlugin?pluginID=dwertheimer.TaskAutomations&command=Process%20Overdue%20Items%20in%20a%20Separate%20Window&arg0=Overdue)  !!!!`
+        const encoded = st.encodeRFC3986URIComponent(input)
+        const decoded = st.decodeRFC3986URIComponent(encoded)
+        console.log(input)
+        console.log(encoded)
+        console.log(decoded)
+        expect(decoded).toEqual(input)
       })
     })
   })

@@ -4,7 +4,15 @@
 import { CustomConsole } from '@jest/console' // see note below
 import * as f from '../NPFrontMatter'
 import {
-  Calendar, Clipboard, CommandBar, DataStore, Editor, NotePlan, simpleFormatter, Note, Paragraph,
+  // Calendar,
+  Clipboard,
+  CommandBar,
+  DataStore,
+  Editor,
+  NotePlan,
+  simpleFormatter,
+  Note,
+  Paragraph,
   // mockWasCalledWithString,
 } from '@mocks/index'
 
@@ -12,7 +20,7 @@ const PLUGIN_NAME = `helpers`
 const FILENAME = `NPFrontMatter`
 
 beforeAll(() => {
-  global.Calendar = Calendar
+  // global.Calendar = Calendar
   global.Clipboard = Clipboard
   global.CommandBar = CommandBar
   global.DataStore = DataStore
@@ -61,7 +69,9 @@ describe(`${PLUGIN_NAME}`, () => {
      */
     describe('noteHasFrontMatter()' /* function */, () => {
       test('should return true if there is frontmatter', () => {
-        const note = new Note({ paragraphs: [new Paragraph({ content: '---' }), new Paragraph({ content: 'bar' }), new Paragraph({ content: '---' })] })
+        const note = new Note({
+          paragraphs: [new Paragraph({ type: 'separator', content: '---' }), new Paragraph({ content: 'bar' }), new Paragraph({ type: 'separator', content: '---' })],
+        })
         const result = f.noteHasFrontMatter(note)
         expect(result).toEqual(true)
       })
@@ -139,6 +149,16 @@ describe(`${PLUGIN_NAME}`, () => {
         expect(result).toEqual(true)
         expect(note.content).toMatch(/title: foo/)
       })
+      test('in project note, should gracefully add frontmatter even it does not have title and NP is seeing the ```mermaid', () => {
+        const note = new Note({
+          paragraphs: [{ content: '```mermaid', headingLevel: 0, type: 'text' }],
+          content: 'foo\nbar',
+          title: '```mermaid',
+        })
+        const result = f.ensureFrontmatter(note)
+        expect(result).toEqual(true)
+        expect(note.content).toMatch('---\ntitle: mermaid\n---\n```mermaid')
+      })
       test('should return true if no content but with title', () => {
         const note = new Note({ paragraphs: [], content: '' })
         const result = f.ensureFrontmatter(note, true, 'baz')
@@ -176,6 +196,18 @@ describe(`${PLUGIN_NAME}`, () => {
         const result = f.quoteText('')
         expect(result).toEqual('""')
       })
+      test('should quote text with leading hashtag', () => {
+        const result = f.quoteText('#foo')
+        expect(result).toEqual('"#foo"')
+      })
+      test('should not quote text with hashtag in the middle', () => {
+        const result = f.quoteText('bar #foo')
+        expect(result).toEqual('bar #foo')
+      })
+      test('should not quote hash with whitespace following (e.g. a comment that will get wiped out)', () => {
+        const result = f.quoteText('# comment')
+        expect(result).toEqual('# comment')
+      })
     })
     /*
      * writeFrontMatter()
@@ -188,7 +220,10 @@ describe(`${PLUGIN_NAME}`, () => {
         expect(result).toEqual(false)
       })
       test('should return true if frontmatter is written', () => {
-        const note = new Note({ paragraphs: [{ content: '---' }, { content: 'title: foo' }, { content: 'bar: baz' }, { content: '---' }], content: '---\ntitle: foo\n---\n' })
+        const note = new Note({
+          paragraphs: [{ type: 'separator', content: '---' }, { content: 'title: foo' }, { content: 'bar: baz' }, { type: 'separator', content: '---' }],
+          content: '---\ntitle: foo\n---\n',
+        })
         const vars = { foo: 'bar' }
         const result = f.writeFrontMatter(note, vars)
         expect(result).toEqual(true)
@@ -290,7 +325,13 @@ describe(`${PLUGIN_NAME}`, () => {
         expect(result).toEqual(false)
       })
       test('should remove matching field from frontmatter but leave separators', () => {
-        const allParas = [{ content: '---' }, { content: 'title: note title' }, { content: 'fieldName: value' }, { content: '---' }, { content: '+ checklist 1' }]
+        const allParas = [
+          { type: 'separator', content: '---' },
+          { content: 'title: note title' },
+          { content: 'fieldName: value' },
+          { type: 'separator', content: '---' },
+          { content: '+ checklist 1' },
+        ]
         const note = new Note({ paragraphs: allParas, content: '' })
         const result = f.removeFrontMatterField(note, 'fieldName', 'value', false)
         expect(result).toEqual(true)
@@ -301,7 +342,7 @@ describe(`${PLUGIN_NAME}`, () => {
         expect(note.paragraphs[3].content).toEqual(allParas[4].content)
       })
       test('should remove single matching field from frontmatter and also separators', () => {
-        const allParas = [{ content: '---' }, { content: 'fieldName: value' }, { content: '---' }, { content: '+ checklist 1' }]
+        const allParas = [{ type: 'separator', content: '---' }, { content: 'fieldName: value' }, { type: 'separator', content: '---' }, { content: '+ checklist 1' }]
         const note = new Note({ paragraphs: allParas, content: '' })
         const result = f.removeFrontMatterField(note, 'fieldName', 'value', true)
         expect(result).toEqual(true)
@@ -309,7 +350,13 @@ describe(`${PLUGIN_NAME}`, () => {
         expect(note.paragraphs[0].content).toEqual(allParas[3].content)
       })
       test('should remove matching field from frontmatter but not separators, converting to Markdown type title', () => {
-        const allParas = [{ content: '---' }, { content: 'fieldName: value' }, { content: 'title: note title' }, { content: '---' }, { content: '+ checklist 1' }]
+        const allParas = [
+          { type: 'separator', content: '---' },
+          { content: 'fieldName: value' },
+          { content: 'title: note title' },
+          { type: 'separator', content: '---' },
+          { content: '+ checklist 1' },
+        ]
         const note = new Note({ paragraphs: allParas, content: '' })
         const result = f.removeFrontMatterField(note, 'fieldName', 'value', true)
         expect(result).toEqual(true)
@@ -320,9 +367,9 @@ describe(`${PLUGIN_NAME}`, () => {
         expect(note.paragraphs[3].content).toEqual(allParas[4].content)
       })
       test('should remove matching field with no value, but leave other field, and therefore also separators', () => {
-        const allParas = [{ content: '---' }, { content: 'field_other: value1' }, { content: 'fieldName:' }, { content: '---' }]
+        const allParas = [{ type: 'separator', content: '---' }, { content: 'field_other: value1' }, { content: 'fieldName:' }, { type: 'separator', content: '---' }]
         const note = new Note({ paragraphs: allParas, content: '' })
-        const result = f.removeFrontMatterField(note, 'fieldName', null, true)
+        const result = f.removeFrontMatterField(note, 'fieldName', '', true)
         expect(result).toEqual(true)
         expect(note.paragraphs.length).toEqual(3)
         expect(note.paragraphs[0].content).toEqual(allParas[0].content)
@@ -330,9 +377,14 @@ describe(`${PLUGIN_NAME}`, () => {
         expect(note.paragraphs[2].content).toEqual(allParas[3].content)
       })
       test('should remove matching field (with no value test) with different values from frontmatter but leave other field, and therefore also separators', () => {
-        const allParas = [{ content: '---' }, { content: 'field_other: value1' }, { content: 'fieldName: this is, a, longer "value 1"' }, { content: '---' }]
+        const allParas = [
+          { type: 'separator', content: '---' },
+          { content: 'field_other: value1' },
+          { content: 'fieldName: this is, a, longer "value 1"' },
+          { type: 'separator', content: '---' },
+        ]
         const note = new Note({ paragraphs: allParas, content: '' })
-        const result = f.removeFrontMatterField(note, 'fieldName', null, true)
+        const result = f.removeFrontMatterField(note, 'fieldName', '', true)
         expect(result).toEqual(true)
         expect(note.paragraphs.length).toEqual(3)
         expect(note.paragraphs[0].content).toEqual(allParas[0].content)
@@ -430,7 +482,7 @@ describe(`${PLUGIN_NAME}`, () => {
       test('should set a frontmatter field that existed before', () => {
         const note = new Note({
           content: '---\ntitle: foo\nbar: baz\n---\n',
-          paragraphs: [{ content: '---' }, { content: 'title: foo' }, { content: 'bar: baz' }, { content: '---' }],
+          paragraphs: [{ type: 'separator', content: '---' }, { content: 'title: foo' }, { content: 'bar: baz' }, { type: 'separator', content: '---' }],
           title: 'foo',
         })
         const result = f.setFrontMatterVars(note, { bar: 'foo' })
@@ -440,7 +492,7 @@ describe(`${PLUGIN_NAME}`, () => {
       test('should set a frontmatter field that did not exist before', () => {
         const note = new Note({
           content: '---\ntitle: foo\nbar: baz\n---\n',
-          paragraphs: [{ content: '---' }, { content: 'title: foo' }, { content: 'bar: baz' }, { content: '---' }],
+          paragraphs: [{ type: 'separator', content: '---' }, { content: 'title: foo' }, { content: 'bar: baz' }, { type: 'separator', content: '---' }],
           title: 'foo',
         })
         const result = f.setFrontMatterVars(note, { sam: 'boy' })
@@ -484,23 +536,10 @@ describe(`${PLUGIN_NAME}`, () => {
         const note = new Note({ content: '', paragraphs: [], title: '' })
         expect(f.addTrigger(note, 'wrongFunction', 'foo', 'bar')).toEqual(false)
       })
-      test('for a non-empty Calendar note should add frontmatter and a single trigger', () => {
-        const note = new Note({
-          type: 'Calendar',
-          content: '* task on first line\n+ checklist on line two',
-          paragraphs: [{ content: '* task on first line' }, { content: '+ checklist on line two' }],
-          title: '',
-        })
-        const result = f.addTrigger(note, 'onEditorWillSave', 'jgclark.Dashboard', 'decideWhetherToUpdateDashboard')
-        expect(result).toEqual(true)
-        expect(note.paragraphs[0].content).toEqual('---')
-        expect(note.paragraphs[1].content).toEqual('triggers: onEditorWillSave => jgclark.Dashboard.decideWhetherToUpdateDashboard')
-        expect(note.paragraphs[2].content).toEqual('---')
-      })
       test('should add a single trigger to existing FM', () => {
         const note = new Note({
           content: '---\ntitle: foo\nbar: baz\n---\n',
-          paragraphs: [{ content: '---' }, { content: 'title: foo' }, { content: 'bar: baz' }, { content: '---' }],
+          paragraphs: [{ type: 'separator', content: '---' }, { content: 'title: foo' }, { content: 'bar: baz' }, { type: 'separator', content: '---' }],
           title: 'foo',
         })
         const result = f.addTrigger(note, 'onOpen', 'foo', 'bar')
@@ -510,15 +549,185 @@ describe(`${PLUGIN_NAME}`, () => {
       test('should not add a trigger where it already exists in FM', () => {
         const note = new Note({
           content: '---\ntitle: foo\ntriggers: onOpen => foo.bar\nauthor: baz\n---\n',
-          paragraphs: [{ content: '---' }, { content: 'title: foo' }, { content: 'triggers: onOpen => foo.bar' }, { content: 'author: baz' }, { content: '---' }],
+          paragraphs: [
+            { type: 'separator', content: '---' },
+            { content: 'title: foo' },
+            { content: 'triggers: onOpen => foo.bar' },
+            { content: 'author: baz' },
+            { type: 'separator', content: '---' },
+          ],
           title: 'foo',
         })
         const result = f.addTrigger(note, 'onOpen', 'foo', 'bar')
         expect(result).toEqual(true)
         expect(note.paragraphs[2].content).toEqual('triggers: onOpen => foo.bar')
       })
+      test('should deal gracefully adding trigger', () => {
+        const note = new Note({
+          type: 'Calendar',
+          content: '* task on first line\n+ checklist on line two',
+          paragraphs: [
+            { type: 'todo', content: '* task on first line' },
+            { type: 'checklist', content: '+ checklist on line two' },
+          ],
+          title: '',
+        })
+        const result = f.addTrigger(note, 'onEditorWillSave', 'jgclark.Dashboard', 'decideWhetherToUpdateDashboard')
+        expect(result).toEqual(true)
+        expect(note.paragraphs[0].content).toEqual('---')
+        expect(note.paragraphs[1].content).toEqual('triggers: onEditorWillSave => jgclark.Dashboard.decideWhetherToUpdateDashboard')
+        expect(note.paragraphs[2].content).toEqual('---')
+      })
     })
 
+    /*
+     * _getFMText()
+     */
+    describe('_getFMText()' /* function */, () => {
+      test('should return blank string if blank note', () => {
+        const result = f._getFMText('')
+        expect(result).toEqual('')
+      })
+      test('should return blank string if no frontmatter', () => {
+        const result = f._getFMText('this\nis\na test')
+        expect(result).toEqual('')
+      })
+      test('should return blank string if incomplete frontmatter', () => {
+        const result = f._getFMText('---\nis\na test')
+        expect(result).toEqual('')
+      })
+      test('should return blank string if incomplete frontmatter2', () => {
+        const result = f._getFMText('--\nis\na test\n--')
+        expect(result).toEqual('')
+      })
+      test('should return frontmatter text even if blank', () => {
+        const result = f._getFMText('---\n---\n')
+        expect(result).toEqual('---\n---\n')
+      })
+      test('should return frontmatter text', () => {
+        const result = f._getFMText('---\nfoo: bar\n---\n')
+        expect(result).toEqual('---\nfoo: bar\n---\n')
+      })
+    })
+
+    /*
+     * _fixFrontmatter()
+     */
+    describe('_fixFrontmatter()' /* function */, () => {
+      test('should not change text with no issues', () => {
+        const before = `---\nfoo: bar\n---\n`
+        const result = f._fixFrontmatter(before)
+        expect(result).toEqual(before)
+      })
+      test('should not change text with no issues', () => {
+        const before = `---\nfoo: bar\n---\n`
+        const result = f._fixFrontmatter(before)
+        expect(result).toEqual(before)
+      })
+      test('should change text with colon at end', () => {
+        const before = `---\nfoo: bar:\n---\n`
+        const result = f._fixFrontmatter(before)
+        expect(result).toEqual(`---\nfoo: "bar:"\n---\n`)
+      })
+      test('should change text with colon space', () => {
+        const before = `---\nfoo: bar: baz\n---\n`
+        const result = f._fixFrontmatter(before)
+        expect(result).toEqual(`---\nfoo: "bar: baz"\n---\n`)
+      })
+      test('should change text with hashtag', () => {
+        const before = `---\nfoo: #bar\n---\n`
+        const result = f._fixFrontmatter(before)
+        expect(result).toEqual(`---\nfoo: "#bar"\n---\n`)
+      })
+      test('should change text with hashtag', () => {
+        const before = `---\nfoo: @bar\n---\n`
+        const result = f._fixFrontmatter(before)
+        expect(result).toEqual(`---\nfoo: "@bar"\n---\n`)
+      })
+      test('should not touch indented text', () => {
+        const indented = `---\ntitle: indented\nkey:\n - value1\n - value2\n---\n`
+        const before = indented
+        const result = f._fixFrontmatter(before)
+        expect(result).toEqual(before)
+      })
+    })
+
+    /*
+     * _sanitizeFrontmatterText()
+     */
+    describe('_sanitizeFrontmatterText()' /* function */, () => {
+      test('should do nothing if no frontmatter', () => {
+        const result = f._sanitizeFrontmatterText('')
+        expect(result).toEqual('')
+      })
+      test('should change text with colon at end', () => {
+        const before = `---\nfoo: bar:\n---\n`
+        const result = f._sanitizeFrontmatterText(before)
+        expect(result).toEqual(`---\nfoo: "bar:"\n---\n`)
+      })
+      test('should change text with colon in middle of value', () => {
+        const before = `---\nfoo: bar: bizzle\n---\n`
+        const result = f._sanitizeFrontmatterText(before)
+        expect(result).toEqual(`---\nfoo: "bar: bizzle"\n---\n`)
+      })
+      test('should change text with attag', () => {
+        const before = `---\nfoo: @bar\n---\n`
+        const result = f._sanitizeFrontmatterText(before)
+        expect(result).toEqual(`---\nfoo: "@bar"\n---\n`)
+      })
+      test('should change text with hashtag', () => {
+        const before = `---\nfoo: #bar\n---\n`
+        const result = f._sanitizeFrontmatterText(before)
+        expect(result).toEqual(`---\nfoo: "#bar"\n---\n`)
+      })
+      test('should not change comments (space after #) which will be wiped out later by fm()', () => {
+        const before = `---\nfoo: # bar\n---\n`
+        const result = f._sanitizeFrontmatterText(before)
+        expect(result).toEqual(`---\nfoo: # bar\n---\n`)
+      })
+      // all other tests are done in _fixFrontmatter()
+    })
+
+    /*
+     * getSanitizedFmParts()
+     */
+    describe('getSanitizedFmParts()' /* function */, () => {
+      test('should make no changes if none are necessary', () => {
+        const before = `---\nfoo: bar\n---\nbaz`
+        const result = f.getSanitizedFmParts(before)
+        const expected = { attributes: { foo: 'bar' }, body: 'baz', bodyBegin: 4, frontmatter: 'foo: bar' }
+        expect(result).toEqual(expected)
+      })
+      test('should make change to sanitized @text and return legal value', () => {
+        const before = `---\nfoo: @bar\n---\nbaz`
+        const result = f.getSanitizedFmParts(before)
+        const expected = { attributes: { foo: '@bar' }, body: 'baz', bodyBegin: 4, frontmatter: 'foo: "@bar"' }
+        expect(result).toEqual(expected)
+      })
+      test('should make change to sanitized #text and return legal value', () => {
+        const before = `---\nfoo: #bar\n---\nbaz`
+        const result = f.getSanitizedFmParts(before)
+        const expected = { attributes: { foo: '#bar' }, body: 'baz', bodyBegin: 4, frontmatter: 'foo: "#bar"' }
+        expect(result).toEqual(expected)
+      })
+      // the other tests should be well covered by the underlying functions
+    })
+
+    /*
+     * sanitizeFrontmatterInNote()
+     */
+    describe('sanitizeFrontmatterInNote()' /* function */, () => {
+      test.skip('should do nothing if none are necesary', () => {
+        const note = new Note({ content: 'baz' })
+        const result = f.getSanitizedFrontmatterInNote(note)
+        expect(result).toEqual(true)
+      })
+      test.skip('should do nothing if none are necesary', () => {
+        const note = new Note({ content: '---\nfoo: bar\n---\nbaz' })
+        const result = f.getSanitizedFrontmatterInNote(note)
+        expect(result).toEqual(true)
+      })
+    })
     /*
      * formatTriggerString()
      */
@@ -546,6 +755,32 @@ describe(`${PLUGIN_NAME}`, () => {
         }
         const result = f.formatTriggerString(obj)
         expect(result).toEqual('onEditorWillSave => np.test.onEditorWillSaveFunc, onEditorWillSave => np.test2.onEditorWillSaveFunc2')
+      })
+    })
+    // moved from FrontMatterModule. Needs to be updated here
+    describe('Frontmatter helpers', () => {
+      test(`getAttributes(): should return attributes using getAttributes()`, () => {
+        const data = `---\ntitle: Test Sample\nname: Mike Erickson\n---\n<%= name %>`
+        const result = f.getAttributes(data)
+        expect(typeof result).toEqual('object')
+        expect(result?.title).toEqual('Test Sample')
+        expect(result?.name).toEqual('Mike Erickson')
+      })
+      test(`getAttributes(): should return only non-template code when second param is true`, () => {
+        const data = `---\ntitle: Test Sample\n<%- foo\nname: Mike Erickson\n---\n<%= name %>`
+        const result = f.getAttributes(data, true)
+        expect(typeof result).toEqual('object')
+        expect(Object.keys(result).length).toEqual(2)
+        expect(result?.title).toEqual('Test Sample')
+        expect(result?.name).toEqual('Mike Erickson')
+      })
+      // moved from FrontMatterModule
+      test(`getBody(): should return attributes using getBody()`, () => {
+        const data = `---\ntitle: Test Sample\nname: Mike Erickson\n---\n<%= name %>`
+        const result = f.getBody(data)
+        expect(typeof result).toEqual('string')
+        expect(result).toContain('<%= name %>')
+        expect(result).not.toContain('title: Test Sample')
       })
     })
   })

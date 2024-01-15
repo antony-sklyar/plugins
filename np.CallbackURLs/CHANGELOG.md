@@ -4,6 +4,18 @@
 
 See Plugin [README](https://github.com/NotePlan/plugins/blob/main/np.CallbackURLs/README.md) for details on available commands and use cases.
 
+## [1.6.1] - 2023-09-12 @dwertheimer
+
+- Bug fix for calling np.Templating (can't pull plugin.json)
+
+## [1.6.0] - 2023-08-27 @dwertheimer
+
+- Adding passpack for /favorite commands (see Favorites Plugin)
+
+## [1.5.0] - 2023-06-10 (@dwertheimer)
+
+- Adding ability to open links in a note for open tasks (under the hood uses new helpers/urls functions for consistency)
+
 ## [1.4.1] - 2022-01-19 (@dwertheimer)
 
 - Make default pretty link the title

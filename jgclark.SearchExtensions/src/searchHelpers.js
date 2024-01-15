@@ -2,7 +2,7 @@
 //-----------------------------------------------------------------------------
 // Search Extensions helpers
 // Jonathan Clark
-// Last updated 23.2.2023 for v1.1.0, @jgclark
+// Last updated 26.12.2023 for v1.3.0, @jgclark
 //-----------------------------------------------------------------------------
 
 import pluginJson from '../plugin.json'
@@ -16,10 +16,11 @@ import {
   nowLocaleShortDateTime,
 } from '@helpers/NPdateTime'
 import { eliminateDuplicateSyncedParagraphs } from '@helpers/syncedCopies'
-import { clo, logDebug, logError, logWarn, timer } from '@helpers/dev'
+import { clo, logDebug, logError, logInfo, logWarn, timer } from '@helpers/dev'
 import { getFilteredFolderList } from '@helpers/folders'
 import { displayTitle, type headingLevelType, titleAsLink } from '@helpers/general'
-import { getNoteByFilename, getNoteContextAsSuffix, getNoteTitleFromFilename, getOrMakeNote, getProjectNotesInFolder, replaceSection } from '@helpers/note'
+import { getNoteByFilename, getNoteContextAsSuffix, getOrMakeNote, getProjectNotesInFolder, replaceSection } from '@helpers/note'
+import { getNoteTitleFromFilename } from '@helpers/NPnote'
 import { isTermInMarkdownPath, isTermInURL } from '@helpers/paragraph'
 import { trimAndHighlightTermInLine } from '@helpers/search'
 import { sortListBy } from '@helpers/sorting'
@@ -80,6 +81,7 @@ export const SYNCABLE_PARA_TYPES = ['open', 'scheduled', 'checklist', 'checklist
 export type SearchConfig = {
   autoSave: boolean,
   folderToStore: string,
+  includeSpecialFolders: boolean,
   foldersToExclude: Array<string>,
   headingLevel: headingLevelType,
   defaultSearchTerms: Array<string>,
@@ -105,7 +107,7 @@ export async function getSearchSettings(): Promise<any> {
   try {
     // Get settings using ConfigV2
     const v2Config: SearchConfig = await DataStore.loadJSON(`../${pluginID}/settings.json`)
-    clo(v2Config, `${pluginID} settings:`)
+    // clo(v2Config, `${pluginID} settings:`)
     if (v2Config == null || Object.keys(v2Config).length === 0) {
       throw new Error(`Cannot find settings for '${pluginID}' plugin`)
     }
@@ -120,31 +122,30 @@ export async function getSearchSettings(): Promise<any> {
 
 /**
 * Take a simple string as search input and process it to turn into an array of strings ready to validate and type.
-* Quoted multi-word search terms (e.g. ["Bob Smith"]) are by default treated as [+Bob +Smith] as I now discover the API doesn't support quoted multi-word search phrases.
+* V3: Quoted multi-word search terms (e.g. ["Bob Smith"]) are now left alone (but without the double quotes). The extra parameter 'modifyQuotedTermsToAndedTerms' has now been removed.
+* V2: Quoted multi-word search terms (e.g. ["Bob Smith"]) are by default treated as [+Bob +Smith] as I now discover the API doesn't support quoted multi-word search phrases.
 * @author @jgclark
-* @param {string | Array<string>} searchArg string containing search term(s) or array of search terms
-* @param {boolean?} modifyQuotedTermsToAndedTerms 
-* @returns {Array<string>} normalised search term(s)
 * @tests in jest file
+* @param {string | Array<string>} searchArg string containing search term(s) or array of search terms
+* @returns {Array<string>} normalised search term(s)
 */
-export function normaliseSearchTerms(
-  searchArg: string,
-  modifyQuotedTermsToAndedTerms?: boolean = true
-): Array<string> {
-  logDebug("normaliseSearchTerms()", `starting for [${searchArg}]`)
+export function normaliseSearchTerms(searchArg: string): Array<string> {
+  // logDebug('normaliseSearchTerms', `starting for [${searchArg}]`)
   let outputArray = []
-  // Take a simple string and process it to turn into an array of string, according to one of several schemes:
-  // if (!searchArg.match(/\w{2,}/)) {
-  //   // this has no words (at least 2 long) -> empty
-  //   logWarn(pluginJson, `No valid words found in [${searchArg}]`)
-  //   return []
-  // }
+
+  // First deal with edge case of empty searchArg, which is now allowed
+  if (searchArg === '') {
+    logWarn('normaliseSearchTerms', `Returning special case of single empty search term`)
+    return ['']
+  }
+
+  // this has free-floating +/- operators -> error (but single ! is allowed)
   if (searchArg.match(/\s[\+\-]\s/)) {
-    // this has free-floating +/- operators -> error (but single ! is allowed)
-    logWarn(pluginJson, `Search string not valid: unattached search operators found in [${searchArg}]`)
+    logWarn('normaliseSearchTerms', `Search string not valid: unattached search operators found in [${searchArg}]`)
     return []
   }
 
+  // Change older search syntax into newer one
   // change simple form [x,y,z] style -> array of x,y,z
   if (searchArg.match(/\w+\s*,\s*\w+/)) {
     outputArray = searchArg.split(/\s*,\s*/)
@@ -160,65 +161,36 @@ export function normaliseSearchTerms(
     outputArray = searchArg.split(/\sOR\s/)
   }
 
-  // // As we want to modify quoted phrases to +words, Go through terms to find multi-word ones, and change to individual + terms
-  // else if (modifyQuotedTermsToAndedTerms) {
-  //   const reResults = searchArg.match(/(?:[^!+-])(?:([\"'])(.+?)\1)/g)
-  //   if (reResults) {
-  //     for (const r of reResults) {
-  //       // the match groups are
-  //       // 0/total matches [ "word1 word2"]
-  //       // 1 first of matching pair of quotes
-  //       // 2 phrase in quotes
-  //       // modify searchArg to make +words instead
-  //       const innerTerms = r[2].split(' ')
-  //       for (const t of innerTerms) {
-  //         outputArray.push(`+${t}`)
-  //       }
-  //     }
-  //   }
-  //   // Now need to add terms not in quotes
-  //   // ???
-  // }
-
   // else treat as [x y z], with or without quoted phrases.
   else {
+    // const searchArgPadded = ' ' + searchArg + ' '
     // This Regex attempts to split words:
-    // - but keeping text in double or single quotes together
-    // - and prefixed search operators !/+/-
+    // - but keeping text in double quotes as one term
     // - and #hashtag/child and @mention(5) possibilities
-    // - a word now may include any of ./!/#/-
-    // To make it more manageable we need to add space to front and end
-    const RE_WOW = new RegExp(/\s([\-\+\!]?)([\-\+\!]?)(?:([\'"])(.+?)\3)|([\-\+\!]?[\w\.\!\-#@\/\(\)]+)/g)
-    const searchArgPadded = ' ' + searchArg + ' '
-    const reResults = searchArgPadded.matchAll(RE_WOW)
+    // - a word now may include any of .!+#-*?'
+    // NB: Allows full unicode letter characters (\p{L}) and numbers (\p{N}) rather than ASCII (\w): (info from Dash.)
+    // NB: To make the regex easier, add a space to start and end, and switch the order of any [-+!]['"]
+    const RE_WOW = new RegExp(/(([\p{L}\p{N}\s\-\/@\(\)#*?.+!']*)(?="\s)|([\p{L}\p{N}\-@\/\(\)#.+!'\*\?]*))/gu)
+    let searchArgPadded = ' ' + searchArg + ' '
+    searchArgPadded = searchArgPadded
+      .replace(/\s-"/, ' "-').replace(/\s\+"/, ' "+').replace(/\s!"/, ' "!')
+    const reResults = searchArgPadded.match(RE_WOW)
     if (reResults) {
-      for (const r of reResults) {
-        // this concats match groups:
-        // 1 (optional operator prefix)
-        // 4 (phrase inside quotes) or
-        // 5 (word not in quotes)
-
-        if (r[4] && r[4].includes(' ') && modifyQuotedTermsToAndedTerms) {
-          // if we want to modify quoted phrases to +words, and we have some quoted phrases,
-          // go through terms to find multi-word ones, and change to individual + terms.
-          // But if we have a simple quoted ["word"] then strip quotes but don't add +
-          // TODO: deal with [-"word1 word2"] case -> '-word1', '-word2' I guess.
-          // TODO: deal with mid-word apostrophe [can't term] case
-          const innerTerms = r[4].split(' ')
-          for (const t of innerTerms) {
-            outputArray.push(`+${t}`)
-          }
-        }
-        else {
-          // add whichever bit of the term matches
-          outputArray.push(`${r[1] ?? ''}${r[4] ?? ''}${r[5] ?? ''}`)
+      logDebug('validateAndTypeSearchTerms', `-> [${String(reResults)}] from [${searchArgPadded}]`)
+      let carryForward = ''
+      for (const rr of reResults) {
+        let r = rr.trim()
+        // Add term as long as it doesn't start with a * or ? or is empty
+        if (r !== '') {
+          // logDebug('r', `[${r}]`)
+          outputArray.push(r)
         }
       }
     } else {
-      logWarn(pluginJson, `Failed to find valid search terms found in [${searchArg}] despite regex magic`)
+      logWarn('normaliseSearchTerms', `Failed to find valid search terms found in [${searchArg}] despite regex magic`)
     }
   }
-  if (outputArray.length === 0) logWarn(pluginJson, `No valid search terms found in [${searchArg}]`)
+  if (outputArray.length === 0) logWarn('normaliseSearchTerms', `No valid search terms found in [${searchArg}]`)
 
   return outputArray
 }
@@ -227,14 +199,15 @@ export function normaliseSearchTerms(
 * Validate and categorise search terms, returning searchTermObject(s).
 * @author @jgclark
 * @param {string} searchArg string containing search term(s) or array of search terms
-* @returns Array<typedSearchTerm>
+* @param {boolean} allowEmptyOrOnlyNegative search terms?
+* @returns {Array<typedSearchTerm>}
 * @tests in jest file
 */
 export function validateAndTypeSearchTerms(searchArg: string, allowEmptyOrOnlyNegative: boolean = false): Array<typedSearchTerm> {
-
   const normalisedTerms = normaliseSearchTerms(searchArg)
+  logDebug('validateAndTypeSearchTerms', `starting with ${String(normalisedTerms.length)} normalised terms: [${String(normalisedTerms)}]`)
 
-  // Don't allow 0 terms, apart from 
+  // Don't allow 0 terms, apart from
   // Special case for @JPR1972: allow negative or empty only
   if (normalisedTerms.length === 0 && !allowEmptyOrOnlyNegative) {
     logError(pluginJson, `No search terms submitted. Stopping.`)
@@ -245,49 +218,81 @@ export function validateAndTypeSearchTerms(searchArg: string, allowEmptyOrOnlyNe
   const validatedTerms: Array<typedSearchTerm> = []
   for (const u of normalisedTerms) {
     let t = u.trim()
-    // if (t.length >= 2) { // Note: now allowing short search terms, as we have a later resultLimit
-    let thisType = ''
-    const thisRep = t
-    if (t[0] === '+') {
-      thisType = 'must'
-      t = t.slice(1)
-    } else if (t[0] === '-') {
-      thisType = 'not-line'
-      t = t.slice(1)
-    } else if (t[0] === '!') {
-      thisType = 'not-note'
-      t = t.slice(1)
+    // Only proceed if this doesn't have a wildcard at the start
+    if (/^[^\*\?]/.test(t)) {
+      let thisType = ''
+      const thisRep = t
+      if (t[0] === '+') {
+        thisType = 'must'
+        t = t.slice(1)
+      } else if (t[0] === '-') {
+        thisType = 'not-line'
+        t = t.slice(1)
+      } else if (t[0] === '!') {
+        thisType = 'not-note'
+        t = t.slice(1)
+      } else {
+        thisType = 'may'
+      }
+      validatedTerms.push({ term: t, type: thisType, termRep: thisRep })
     } else {
-      thisType = 'may'
+      logDebug('normaliseSearchTerms', `- ignoring invalid search term: [${t}]`)
     }
-    validatedTerms.push({ term: t, type: thisType, termRep: thisRep })
-    // } else {
-    //   logWarn(pluginJson, `Note: search term '${t}' was removed because it is less than 3 characters long`)
-    // }
+  }
+
+  // Stop if we have a silly number of search terms
+  if (validatedTerms.length > 9) {
+    logWarn(pluginJson, `Too many search terms given (${validatedTerms.length}); stopping as this might be an error.`)
+    return []
   }
 
   // Now check we have a valid set of terms. (If they're not valid, return an empty array.)
   // Invalid if we don't have any must-have or may-have search terms
   if (validatedTerms.filter((t) => (t.type === 'may' || t.type === 'must')).length === 0) {
-    if (!allowEmptyOrOnlyNegative) {
-      logWarn(pluginJson, 'No positive match search terms given; stopping.')
-      return []
-    } else {
+    if (allowEmptyOrOnlyNegative) {
       // Special case: requires adding an empty 'must' term
       logDebug(pluginJson, 'No positive match search terms given, so adding an empty one under the hood.')
-      validatedTerms.push({ term: '', type: 'must', termRep: '' })
+      validatedTerms.push({ term: '', type: 'must', termRep: '<empty>' })
+    } else {
+      logWarn(pluginJson, 'No positive match search terms given; stopping.')
+      return []
     }
   }
 
-  // Stop if we have a silly number of search terms
-  if (validatedTerms.length > 7) {
-    logWarn(pluginJson, `Too many search terms given (${validatedTerms.length}); stopping as this might be an error.`)
+  let validTermsStr = `[${validatedTerms.map((t) => t.termRep).join(', ')}]`
+  logDebug('search/validateAndTypeSearchTerms', `Validated ${String(validatedTerms.length)} terms -> ${validTermsStr}`)
+  return validatedTerms
+}
+
+/**
+* Optimise the order to tackle search terms. Assumes these have been normalised and validated already.
+* @author @jgclark
+* @param {Array<typedSearchTerm>} inputTerms
+* @returns {Array<typedSearchTerm>} output
+* TODO: @tests in jest file
+*/
+export function optimiseOrderOfSearchTerms(inputTerms: Array<typedSearchTerm>): Array<typedSearchTerm> {
+  try {
+    logDebug('optimiseOrderOfSearchTerms', `starting with ${String(inputTerms.length)} terms`)
+    // Expand the typedSearchTerm object to include length of terms
+    const expandedInputTerms = inputTerms.map((i) => {
+      return {
+        typeOrder: (i.type === 'must') ? 'aaa' : i.type, // 'must' needs to come first, so make it to 'aaa' in a separate variable in the item
+        type: i.type,
+        term: i.term,
+        termRep: i.termRep,
+        longestWordLength: i.term.length
+      }
+    })
+    clo(expandedInputTerms, 'expandedInputTerms = ')
+    const sortKeys = ['typeOrder', 'longestWordLength']
+    logDebug('optimiseOrderOfSearchTerms', `- Will use sortKeys: [${String(sortKeys)}]`)
+    const sortedTerms: Array<typedSearchTerm> = sortListBy(expandedInputTerms, sortKeys)
+    clo(sortedTerms, 'optimiseOrderOfSearchTerms -> ')
+    return sortedTerms
+  } catch (err) {
     return []
   }
-
-  let validTermsStr = `[${validatedTerms.map((t) => t.termRep).join(', ')}]`
-  logDebug('search/validateAndTypeSearchTerms', `Validated terms -> ${validTermsStr}`)
-  return validatedTerms
 }
 
 /**
@@ -315,8 +320,8 @@ export function differenceByPropVal<P: string, T: { +[P]: mixed, ... }> (
 /**
  * Simple Object equality test, working for ONE-LEVEL only objects.
  * from https://stackoverflow.com/a/5859028/3238281
- * @param {Object} o1 
- * @param {Object} o2 
+ * @param {Object} o1
+ * @param {Object} o2
  * @returns {boolean} does o1 = o2?
  * @test in jest file
  */
@@ -358,12 +363,12 @@ export function differenceByObjectEquality<P: string, T: { +[P]: mixed, ... }> (
 
 /**
  * Returns array of intersection of arrA + arrB (only for noteAndLine types)
- * TODO: Make a more generic version of this, possibly using help from 
+ * TODO: Make a more generic version of this, possibly using help from
  * https://stackoverflow.com/questions/1885557/simplest-code-for-array-intersection-in-javascript
  * @author @jgclark
- * 
- * @param {Array<noteAndLine>} arrA 
- * @param {Array<noteAndLine>} arrB 
+ *
+ * @param {Array<noteAndLine>} arrA
+ * @param {Array<noteAndLine>} arrB
  * @returns {Array<noteAndLine>} array of intersection of arrA + arrB
  */
 export function noteAndLineIntersection(arrA: Array<noteAndLine>, arrB: Array<noteAndLine>):
@@ -379,7 +384,7 @@ export function noteAndLineIntersection(arrA: Array<noteAndLine>, arrB: Array<no
 }
 
 /**
- * Get string representation of multiple search terms
+ * Get string representation of multiple search terms, complete with surrounding sqaure brackets (following Google's style)
  * @param {typedSearchTerm[]} searchTerms
  * @returns {string}
  */
@@ -389,7 +394,10 @@ export function getSearchTermsRep(typedSearchTerms: Array<typedSearchTerm>): str
 
 /**
  * This is where the search logic is applied, using the must/may/not terms.
- * Returns the subset of results, and can optionally limit the number of results returned to the first 'resultLimit' items
+ * Returns the subset of results, and can optionally limit the number of results returned to the first 'resultLimit' items.
+ * If fromDateStr and toDateStr are given, then it will filter out results from Project Notes or the Calendar notes from outside that date range (measured at the first date of the Calendar note's period).
+ * Note: assumes the order of searchTerms has been optimised before now
+ *
  * Called by runSearchesV2
  * @param {Array<resultObjectTypeV3>}
  * @param {number} resultLimit (optional; defaults to 500)
@@ -407,15 +415,16 @@ export function applySearchOperators(
   const mustResultObjects: Array<resultObjectTypeV3> = termsResults.filter((t) => t.searchTerm.type === 'must')
   const mayResultObjects: Array<resultObjectTypeV3> = termsResults.filter((t) => t.searchTerm.type === 'may')
   const notResultObjects: Array<resultObjectTypeV3> = termsResults.filter((t) => t.searchTerm.type.startsWith('not'))
-  logDebug('applySearchOperators', `Starting with ${getSearchTermsRep(termsResults.map(m => m.searchTerm))}: ${mustResultObjects.length} must terms; ${mayResultObjects.length} may terms; ${notResultObjects.length} not terms`)
+  logDebug('applySearchOperators', `Starting with ${getSearchTermsRep(termsResults.map(m => m.searchTerm))}: ${mustResultObjects.length} must terms; ${mayResultObjects.length} may terms; ${notResultObjects.length} not terms. Limiting to ${resultLimit} results. ${(fromDateStr && toDateStr) ? '- with dates from ' + fromDateStr + ' to ' + toDateStr : 'with no dates'}`)
 
   // clo(termsResults, 'resultObjectV3: ')
 
   let consolidatedNALs: Array<noteAndLine> = []
   let consolidatedNoteCount = 0
   let consolidatedLineCount = 0
-  let uniquedFilenames = []
+  let uniquedFilenames: Array<string> = []
 
+  // ------------------------------------------------------------
   // Write any *first* 'must' search results to consolidated set
   if (mustResultObjects.length > 0) {
     const r = mustResultObjects[0]
@@ -429,6 +438,19 @@ export function applySearchOperators(
     consolidatedNoteCount = numberOfUniqueFilenames(consolidatedNALs)
     consolidatedLineCount = consolidatedNALs.length
     logDebug('applySearchOperators', `- must: after term 1, ${consolidatedLineCount} results`)
+
+    // If no results by now, there's no point finding anything further, so just form up an almost-empty return
+    if (consolidatedLineCount === 0) {
+      logInfo('applySearchOperators', `- must: no results found after must term [${r.searchTerm.termRep}] so stopping early.`)
+      const consolidatedResultsObject: resultOutputTypeV3 = {
+        searchTermsRepArr: termsResults.map((m) => m.searchTerm.termRep),
+        resultNoteAndLineArr: [],
+        resultCount: 0,
+        resultNoteCount: 0,
+        fullResultCount: 0
+      }
+      return consolidatedResultsObject
+    }
 
     // Write any *subsequent* 'must' search results to consolidated set,
     // having computed the intersection with the consolidated set
@@ -445,7 +467,6 @@ export function applySearchOperators(
         const intersectionNALArray = noteAndLineIntersection(consolidatedNALs, r.resultNoteAndLineArr)
         logDebug('applySearchOperators', `- must: intersection of ${r.searchTerm.termRep} -> ${intersectionNALArray.length} results`)
         consolidatedNALs = intersectionNALArray
-        // clo(consolidatedNALs, `consolidatedNALs after must[${j}] intersection`)
         j++
       }
 
@@ -454,12 +475,27 @@ export function applySearchOperators(
       consolidatedNoteCount = numberOfUniqueFilenames(consolidatedNALs)
       consolidatedLineCount = consolidatedNALs.length
       // clo(consolidatedNALs, '(after must) consolidatedNALs:')
+      logDebug('applySearchOperators', `- must: after all ${mustResultObjects.length} terms, ${consolidatedLineCount} results`)
+
+      // If no results by now, there's no point finding anything further, so just form up an almost-empty return
+      if (consolidatedLineCount === 0) {
+        logInfo('applySearchOperators', `- must: no results found after must term [${r.searchTerm.termRep}] so stopping early.`)
+        const consolidatedResultsObject: resultOutputTypeV3 = {
+          searchTermsRepArr: termsResults.map((m) => m.searchTerm.termRep),
+          resultNoteAndLineArr: [],
+          resultCount: 0,
+          resultNoteCount: 0,
+          fullResultCount: 0
+        }
+        return consolidatedResultsObject
+      }
     }
     logDebug('applySearchOperators', `Must: at end, ${consolidatedLineCount} results`)
   } else {
     logDebug('applySearchOperators', `- must: No results found for must-find search terms`)
   }
 
+  // ------------------------------------------------------------
   // Check if we can add the 'may' search results to consolidated set
   let addedAny = false
   for (const r of mayResultObjects) {
@@ -495,6 +531,7 @@ export function applySearchOperators(
   }
   logDebug('applySearchOperators', `May: at end, ${consolidatedLineCount} results from ${consolidatedNoteCount} notes`)
 
+  // ------------------------------------------------------------
   // Delete any results from the consolidated set that match 'not-...' terms
   let removedAny = false
   for (const r of notResultObjects) {
@@ -538,11 +575,13 @@ export function applySearchOperators(
   }
   logDebug('applySearchOperators', `Not: at end, ${consolidatedLineCount} results from ${consolidatedNoteCount} notes`)
 
+  // ------------------------------------------------------------
   // If we have date limits, now apply them
   if (fromDateStr && toDateStr) {
     logDebug('applySearchOperators', `- Will now filter out Calendar note results outside ${fromDateStr}-${toDateStr} from ${consolidatedLineCount} results`)
-    // Keep notes that don't start with a year, or fall within the date range
-    consolidatedNALs = consolidatedNALs.filter((f) => !f.noteFilename.match(/^\d{4}/) || withinDateRange(getDateStrForStartofPeriodFromCalendarFilename(f.noteFilename), fromDateStr, toDateStr))
+    // Keep results only from within the date range (measured at the first date of the Calendar note's period)
+    // TODO: ideally change to cover whole of a calendar note's date range
+    consolidatedNALs = consolidatedNALs.filter((f) => /** !f.noteFilename.match(/^\d{4}/) || */ withinDateRange(getDateStrForStartofPeriodFromCalendarFilename(f.noteFilename), fromDateStr, toDateStr))
     consolidatedLineCount = consolidatedNALs.length
     consolidatedNoteCount = numberOfUniqueFilenames(consolidatedNALs)
     logDebug('applySearchOperators', `- After filtering out by date: ${consolidatedLineCount} results`)
@@ -550,6 +589,7 @@ export function applySearchOperators(
 
   let fullResultCount = consolidatedLineCount
 
+  // ------------------------------------------------------------
   // Now check to see if we have more than config.resultLimit: if so only use the first amount to return
   if (resultLimit > 0 && consolidatedLineCount > resultLimit) {
     // First make a note of the total (to display later)
@@ -579,7 +619,7 @@ export function applySearchOperators(
  * but I can't make it work, so I'm going to hack it by joining the two object parts together,
  * then deduping, and then splitting out again
  * @author @jgclark
- * @param {Array<noteAndLine>} inArray 
+ * @param {Array<noteAndLine>} inArray
  * @returns {Array<noteAndLine>} outArray
  * @tests in jest file
  */
@@ -597,7 +637,7 @@ export function reduceNoteAndLineArray(inArray: Array<noteAndLine>): Array<noteA
 
 /**
  * Count unique filenames present in array
- * @param {Array<noteAndLine>} inArray 
+ * @param {Array<noteAndLine>} inArray
  * @returns {number} of unique filenames present
  * @test in jest file
  */
@@ -609,9 +649,9 @@ export function numberOfUniqueFilenames(inArray: Array<noteAndLine>): number {
 
 /**
  * Run a search over all search terms in 'termsToMatchArr' over the set of notes determined by the parameters.
- * V2 of this function
+ * V3 of this function, which assumes the order of terms in termsToMatchArr has been optimised.
  * Has an optional 'paraTypesToInclude' parameter of paragraph type(s) to include (e.g. ['open'] to include only open tasks). If not given, then no paragraph types will be excluded.
- * 
+ *
  * @param {Array<string>} termsToMatchArr
  * @param {Array<string>} noteTypesToInclude (['notes'] or ['calendar'] or both)
  * @param {Array<string>} foldersToInclude (can be empty list)
@@ -636,12 +676,14 @@ export async function runSearchesV2(
     const termsResults: Array<resultObjectTypeV3> = []
     let resultCount = 0
     let outerStartTime = new Date()
-    logDebug('runSearchesV2', `Starting with ${termsToMatchArr.length} search term(s) (and paraTypes '${String(paraTypesToInclude)}')`)
+    logDebug('runSearchesV2', `Starting with ${termsToMatchArr.length} search term(s) and paraTypes '${String(paraTypesToInclude)}'. (With ${(fromDateStr && toDateStr) ? fromDateStr + '-' + toDateStr : 'no'} dates.)`)
 
     //------------------------------------------------------------------
     // Get results for each search term independently and save
+    // let lastTermType = ''
     for (const typedSearchTerm of termsToMatchArr) {
-      logDebug('runSearchesV2', `  - searching for term [${typedSearchTerm.termRep}] ...`)
+      let thisTermType = typedSearchTerm.type
+      logDebug('runSearchesV2', `  - searching for term [${typedSearchTerm.termRep}] type '${thisTermType}':`)
       const innerStartTime = new Date()
 
       // do search for this search term, using configured options
@@ -651,21 +693,23 @@ export async function runSearchesV2(
       termsResults.push(resultObject)
       resultCount += resultObject.resultCount
       logDebug('runSearchesV2', `  -> ${resultObject.resultCount} results for '${typedSearchTerm.termRep}' in ${timer(innerStartTime)}`)
+
+      // If we have no results from previous 'must' term, then return early
+      if (thisTermType === 'must' && resultCount === 0) {
+        logInfo('runSearchesV2', `- no results from 'must' term [${typedSearchTerm.termRep}], so not doing further searches.`)
+        break
+      }
+      // TODO: Can we extend the above to check with not as well?
+      // lastTermType = typedSearchTerm.termType
     }
 
-    logDebug('runSearchesV2', `- ${termsToMatchArr.length} searches completed in ${timer(outerStartTime)}s -> ${resultCount} results`)
-
-    // // If we have no results, then return early
-    // clo(termsResults, 'resultsProm in top level')
-    // if (resultCount === 0) {
-    //   return []
-    // }
+    logDebug('runSearchesV2', `- ${termsToMatchArr.length} searches completed in ${timer(outerStartTime)} -> ${resultCount} results`)
 
     //------------------------------------------------------------------
-    // Work out what subset of results to return, taking into the must/may/not terms
+    // Work out what subset of results to return, taking into the must/may/not terms, and potentially dates too
     outerStartTime = new Date()
     const consolidatedResultSet: resultOutputTypeV3 = applySearchOperators(termsResults, config.resultLimit, fromDateStr, toDateStr)
-    logDebug('runSearchesV2', `- Applied search logic in ${timer(outerStartTime)}s`)
+    logDebug('runSearchesV2', `- Applied search logic in ${timer(outerStartTime)}`)
 
     // For open tasks, add line sync with blockIDs (if we're using 'NotePlan' display style)
     // clo(consolidatedResultSet, 'after applySearchOperators, consolidatedResultSet =')
@@ -680,68 +724,6 @@ export async function runSearchesV2(
   catch (err) {
     logError('runSearchesV2', err.message)
     return { searchTermsRepArr: [], resultNoteAndLineArr: [], resultCount: 0, resultNoteCount: 0, fullResultCount: 0 } // for completeness
-  }
-}
-
-/**
- * Go through results, and if there are open task lines, then sync lines by adding a blockID (having checked there isn't one already).
- * @author @jgclark
- * @param {resultOutputTypeV3} input
- * @returns {resultOutputTypeV3}
- */
-export async function makeAnySyncs(input: resultOutputTypeV3): Promise<resultOutputTypeV3> {
-  try {
-    // Go through each line looking for open tasks
-    let linesToSync = []
-    let rnalCount = 0
-    for (let rnal of input.resultNoteAndLineArr) {
-      // Get the line details (have to get from DataStore)
-      const thisIndex = rnalCount
-      const thisLine = rnal.line
-      const thisNote = getNoteByFilename(rnal.noteFilename)
-      const thisPara = thisNote?.paragraphs?.[rnal.index]
-      const thisType = thisPara?.type ?? ''
-
-      // If this line is an open-type task without existing blockID, then add to array to process
-      if (thisNote && SYNCABLE_PARA_TYPES.includes(thisType) && thisPara && !thisPara?.blockId) {
-        linesToSync.push([thisIndex, thisLine, thisNote, thisPara, thisType])
-        logDebug('makeAnySyncs', `- lineToSync from rnal index ${thisIndex}`)
-      }
-      rnalCount++
-    }
-
-    // If >=20 open tasks, check user really wants to do this
-    if (linesToSync.length >= 20) {
-      const res = await showMessageYesNo(`I have found ${linesToSync.length} results with open tasks, which will be sync'd to this note. Do you wish to continue?`)
-      if (res !== 'Yes') {
-        return input
-      }
-    }
-
-    let output = input
-    if (linesToSync.length > 0) {
-      for (const lineDetails of linesToSync) {
-        let [thisIndex, thisLine, thisNote, thisPara, thisType] = lineDetails
-        // Add blockID to source
-        // logDebug('makeAnySyncs', `- will add blockId to source line '${thisLine}' index ${thisIndex}`)
-        thisNote.addBlockID(thisPara)
-        thisNote.updateParagraph(thisPara)
-        const thisBlockID = thisPara.blockId ?? '<error>'
-        // logDebug('makeAnySyncs', `- added blockId '${thisBlockID}' to source line`)
-        // Now append to result
-        const updatedLine = `${thisLine} ${thisBlockID}`
-        output.resultNoteAndLineArr[thisIndex].line = updatedLine
-        logDebug('makeAnySyncs', `- appended blockId to result ${thisIndex} -> '${updatedLine}'`)
-      }
-    } else {
-      logDebug('makeAnySyncs', `No Synced lines in result set`)
-    }
-    return output
-  }
-  catch (err) {
-    logError('makeAnySyncs', err.message)
-    // $FlowFixMe[incompatible-return]
-    return null
   }
 }
 
@@ -774,34 +756,79 @@ export async function runSearchV2(
 ): Promise<resultObjectTypeV3> {
   try {
     const headingMarker = '#'.repeat(config.headingLevel)
-    const searchTerm = typedSearchTerm.term
+    const fullSearchTerm = typedSearchTerm.term
+    let searchTerm = fullSearchTerm
     let resultParas: Array<TParagraph> = []
+    let multiWordSearch = false
+    let wildcardedSearch = false
     logDebug('runSearchV2', `Starting for [${searchTerm}]`)
 
-    // get list of matching paragraphs for this string
-    if (searchTerm !== '') {
-      CommandBar.showLoading(true, `Running search for ${typedSearchTerm.termRep} ...`)
-      const tempResult = await DataStore.search(searchTerm, noteTypesToInclude, foldersToInclude, foldersToExclude)
-      resultParas = tempResult.slice()
-      CommandBar.showLoading(false)
-    } else if (paraTypesToInclude.includes('open')) {
-      CommandBar.showLoading(true, `Finding all tasks without initial search term, but restricting to types '${String(paraTypesToInclude)}' ...`)
-      const folderList = getFilteredFolderList(foldersToExclude, true)
+    // V1: get list of matching paragraphs for this string by n.paragraphs.filter
+    // ...
+    // V2: get list of matching paragraphs for this string by ???
+    // ...
+    // V3: use DataStore.search() API call that's now available
+    // ...
+    // V4: to deal with multi-word search terms, when the API doesn't,
+    // we will now just search for the first word in the search term
+    if (searchTerm.includes(" ")) {
+      multiWordSearch = true
+      const words = searchTerm.split(' ')
+      // use the longest word not just the first
+      const longestWord = words.length > 0 ? words.sort((a, b) => b.length - a.length)[0] : ''
+      searchTerm = longestWord
+      logDebug('runSearchV2', `multi-word: will just use [${searchTerm}] for [${fullSearchTerm}], and then do fuller check on results`)
+    }
 
-      for (const f of folderList) {
-        const noteList = getProjectNotesInFolder(f) // does not include any sub-folders
-        logDebug('runSearchV2', `- checking ${noteList.length} notes in folder '${f}'`)
-        for (const n of noteList) {
-          const theseResults = n.paragraphs?.filter(isOpen)// TEST: me replacing line below
-          // const theseResults = n.paragraphs?.filter((p) => p.type === 'open') ?? []
-          resultParas.push(...theseResults)
+    // if search term includes * or ? then we need to do further wildcard filtering
+    // reduce search term to just the part before the wildcard
+    let beforeWildcardSearchTerm = ''
+    let wildcardOnwardsSearchTerm = ''
+    if (searchTerm.includes("*") || searchTerm.includes("?")) {
+      searchTerm = searchTerm.split(/[\*\?]/, 1)[0]
+      wildcardOnwardsSearchTerm = fullSearchTerm.slice(searchTerm.length)
+      wildcardedSearch = true
+      logDebug('runSearchV2', `wildcard: will now use [${searchTerm}] for [${fullSearchTerm}]`)
+    }
+
+    //-------------------------------------------------------
+    // Finally, the actual Search API Call!
+    CommandBar.showLoading(true, `Running search for ${fullSearchTerm} ${fullSearchTerm !== searchTerm ? '(via ' + searchTerm + ') ' : ''}...`)
+
+    const response = await DataStore.search(searchTerm, noteTypesToInclude, foldersToInclude, foldersToExclude, false)
+    let tempResult: Array<TParagraph> = response.slice() // to convert from $ReadOnlyArray to $Array
+
+    CommandBar.showLoading(false)
+    //-------------------------------------------------------
+
+    // if we have a multi-word search, then filter out the results to those that just contain the full search term
+    if (multiWordSearch) {
+      logDebug('runSearchV2', `multi-word: before filtering: ${String(tempResult.length)}`)
+      tempResult = tempResult.filter(tr => tr.content.includes(fullSearchTerm))
+      logDebug('runSearchV2', `multi-word: after filtering: ${String(tempResult.length)}`)
+    }
+
+    // if search term includes * or ? then we need to do further wildcard filtering, but using regex version:
+    // - replace ? with .
+    // - replace * with [^\s]*? (i.e. any anything within the same 'word')
+    if (wildcardedSearch) {
+      const regexSearchTerm = new RegExp('\\b' + fullSearchTerm.replace(/\?/g, '.').replace(/\*/g, '[^\\s]*?') + '\\b')
+      logDebug('runSearchV2', `wildcard: before regex filtering with ${String(regexSearchTerm)}: ${String(tempResult.length)}`)
+      tempResult = tempResult.filter(tr => regexSearchTerm.test(tr.content))
+      logDebug('runSearchV2', `wildcard: after filtering: ${String(tempResult.length)}`)
+    }
+
+    if (paraTypesToInclude.length > 0) {
+      CommandBar.showLoading(true, `Now filtering to para types '${String(paraTypesToInclude)}' ...`)
+      // Check each result and add to the resultParas array only if it matches the given paraTypesToInclude
+      for (const tr of tempResult) {
+        if (paraTypesToInclude.includes(tr.type)) {
+          resultParas.push(tr)
         }
       }
-      CommandBar.showLoading(false)
       logDebug('runSearchV2', `- found ${resultParas.length} open tasks to work from`)
     } else {
-      // Shouldn't get here, so raise an error
-      throw new Error("Empty search term: stopping.")
+      resultParas = tempResult
     }
 
     const noteAndLineArr: Array<noteAndLine> = []
@@ -835,7 +862,6 @@ export async function runSearchV2(
       // Drop out search results with the wrong paragraph type (if any given)
       let filteredParas: Array<reducedFieldSet> = []
       logDebug('runSearchV2', `- before types filter (${paraTypesToInclude.length} = '${String(paraTypesToInclude)}')`)
-
       if (paraTypesToInclude && paraTypesToInclude.length > 0) {
         filteredParas = resultFieldSets.filter((p) => paraTypesToInclude.includes(p.type))
         logDebug('runSearchV2', `- after types filter (to ${String(paraTypesToInclude)}), ${filteredParas.length} results`)
@@ -903,7 +929,7 @@ export function resultCounts(resultSet: resultOutputTypeV3): string {
  * The data is in the first parameter; the rest are various settings.
  * Note: It's now possible to give a 'heading' parameter: if it's given then just that section will be replaced, otherwise the whole contents will be deleted first.
  * @author @jgclark
- * 
+ *
  * @param {resultOutputTypeV3} resultSet object
  * @param {string} requestedTitle requested note title to use/make
  * @param {string} titleToMatch partial title to match against existing note titles
@@ -924,25 +950,29 @@ export async function writeSearchResultsToNote(
     let outputNote: ?TNote
     let noteFilename = ''
     const headingMarker = '#'.repeat(config.headingLevel)
-    const searchTermsRepStr = `"${resultSet.searchTermsRepArr.join(' ')}"`.trim()
-    logDebug('writeSearchResultsToNote', `Starting with ${resultSet.resultCount} results for ${searchTermsRepStr} ...`)
-    const xCallbackLine = (xCallbackURL !== '') ? ` [🔄 Refresh results for '${searchTermsRepStr}'](${xCallbackURL})` : ''
+    const searchTermsRepStr = `'${resultSet.searchTermsRepArr.join(' ')}'`.trim() // Note: we normally enclose in [] but here need to use '' otherwise NP Editor renders the link wrongly
+    logDebug('writeSearchResultsToNote', `Starting with ${resultSet.resultCount} results for [${searchTermsRepStr}] ...`)
+    const xCallbackText = (xCallbackURL !== '') ? ` [🔄 Refresh results for ${searchTermsRepStr}](${xCallbackURL})` : ''
+    const timestampAndRefreshLine = `at ${nowLocaleShortDateTime()}${xCallbackText}`
 
     // Add each result line to output array
-    let titleLines = `# ${requestedTitle}\nat ${nowLocaleShortDateTime()}${xCallbackLine}`
+    // let titleLines = `# ${requestedTitle}\n${timestampAndRefreshLine}`
+    let titleLines = `# ${requestedTitle}`
     let headingLine = ''
     let resultsContent = ''
     // First check if we have any results
     if (resultSet.resultCount > 0) {
-      resultsContent = createFormattedResultLines(resultSet, config).join('\n')
+      resultsContent = '\n' + createFormattedResultLines(resultSet, config).join('\n')
       const resultCountsStr = resultCounts(resultSet)
       headingLine += `${searchTermsRepStr} ${resultCountsStr}`
     }
     else {
       // No results
       headingLine = `${searchTermsRepStr}`
-      resultsContent = `(no matches)`
+      resultsContent = "(no matches)"
     }
+    // Prepend the results part with the timestamp+refresh line
+    resultsContent = `${timestampAndRefreshLine}${resultsContent}`
     // logDebug('writeSearchResultsToNote', `resultsContent is ${resultsContent.length} bytes`)
 
     // Get existing note by start-of-string match on titleToMatch, if that is supplied, or requestedTitle if not.
@@ -953,6 +983,13 @@ export async function writeSearchResultsToNote(
         // Just replace the heading section, to allow for some text to be left between runs
         logDebug('writeSearchResultsToNote', `- just replacing section '${searchTermsRepStr}' in ${outputNote.filename}`)
         replaceSection(outputNote, searchTermsRepStr, headingLine, config.headingLevel, resultsContent)
+
+        // Because of a change in where the timestamp is displayed, we potentially need to remove it from line 1 of the note
+        const line1 = outputNote.paragraphs[1].content
+        if (line1.startsWith('at ') && line1.includes('Refresh results for ')) {
+          logDebug('writeSearchResultsToNote', `- removing timestamp from line 1 of ${outputNote.filename}. This should be one-time-only operation.`)
+          outputNote.removeParagraphAtIndex(1)
+        }
       }
       else {
         // Replace all note contents
@@ -962,7 +999,7 @@ export async function writeSearchResultsToNote(
         outputNote.content = newContent
       }
       noteFilename = outputNote.filename ?? '<error>'
-      logDebug('writeSearchResultsToNote', `written resultSet for '${searchTermsRepStr}' to the note ${noteFilename} (${displayTitle(outputNote)})`)
+      logDebug('writeSearchResultsToNote', `written resultSet for [${searchTermsRepStr}] to the note ${noteFilename} (${displayTitle(outputNote)})`)
       // logDebug('writeSearchResultsToNote', `-> ${String(outputNote.content?.length)} bytes`)
       return noteFilename
     }
@@ -977,10 +1014,10 @@ export async function writeSearchResultsToNote(
 }
 
 /**
- * Create nicely-formatted lines to display 'resultSet', using settings from 'config'
+ * Create nicely-formatted Markdown lines to display 'resultSet', using settings from 'config'
  * @author @jgclark
  * @param {resultOutputTypeV2} resultSet
- * @param {SearchConfig} config 
+ * @param {SearchConfig} config
  * @returns {Array<string>} formatted search reuslts
  */
 export function createFormattedResultLines(resultSet: resultOutputTypeV3, config: SearchConfig): Array<string> {
@@ -994,11 +1031,12 @@ export function createFormattedResultLines(resultSet: resultOutputTypeV3, config
     // Take off leading + or ! if necessary
     const mayOrMustTerms = mayOrMustTermsRep.map((f) => (f.match(/^[\+\!]/)) ? f.slice(1) : f)
     const notEmptyMayOrMustTerms = mayOrMustTerms.filter((f) => f !== '')
-    logDebug('createFormattedResultLines', `Starting with ${notEmptyMayOrMustTerms.length} notEmptyMayOrMustTerms (${String(notEmptyMayOrMustTerms)})`)
+    // logDebug('createFormattedResultLines', `Starting with ${notEmptyMayOrMustTerms.length} notEmptyMayOrMustTerms (${String(notEmptyMayOrMustTerms)}) / simplifyLine? ${String(simplifyLine)} / groupResultsByNote? ${String(config.groupResultsByNote)} / config.resultQuoteLength = ${String(config.resultQuoteLength)}`)
     // Add each result line to output array
     let lastFilename: string
     let nc = 0
     for (const rnal of resultSet.resultNoteAndLineArr) {
+      // clo(rnal, `resultNoteAndLineArr[${nc}]`)
       if (config.groupResultsByNote) {
         // Write each line without transformation, grouped by Note, with Note headings inserted accordingly
         let thisFilename = rnal.noteFilename
@@ -1027,5 +1065,67 @@ export function createFormattedResultLines(resultSet: resultOutputTypeV3, config
     logError('createFormattedResultLines', err.message)
     clo(resultSet)
     return [] // for completeness
+  }
+}
+
+/**
+ * Go through results, and if there are open task lines, then sync lines by adding a blockID (having checked there isn't one already).
+ * @author @jgclark
+ * @param {resultOutputTypeV3} input
+ * @returns {resultOutputTypeV3}
+ */
+export async function makeAnySyncs(input: resultOutputTypeV3): Promise<resultOutputTypeV3> {
+  try {
+    // Go through each line looking for open tasks
+    let linesToSync = []
+    let rnalCount = 0
+    for (let rnal of input.resultNoteAndLineArr) {
+      // Get the line details (have to get from DataStore)
+      const thisIndex = rnalCount
+      const thisLine = rnal.line
+      const thisNote = getNoteByFilename(rnal.noteFilename)
+      const thisPara = thisNote?.paragraphs?.[rnal.index]
+      const thisType = thisPara?.type ?? ''
+
+      // If this line is an open-type task without existing blockID, then add to array to process
+      if (thisNote && SYNCABLE_PARA_TYPES.includes(thisType) && thisPara && !thisPara?.blockId) {
+        linesToSync.push([thisIndex, thisLine, thisNote, thisPara, thisType])
+        logDebug('makeAnySyncs', `- lineToSync from rnal index ${thisIndex}`)
+      }
+      rnalCount++
+    }
+
+    // If >=20 open tasks, check user really wants to do this
+    if (linesToSync.length >= 20) {
+      const res = await showMessageYesNo(`I have found ${linesToSync.length} results with open tasks, which will be sync'd to this note. Do you wish to continue?`)
+      if (res !== 'Yes') {
+        return input
+      }
+    }
+
+    let output = input
+    if (linesToSync.length > 0) {
+      for (const lineDetails of linesToSync) {
+        let [thisIndex, thisLine, thisNote, thisPara, thisType] = lineDetails
+        // Add blockID to source
+        // logDebug('makeAnySyncs', `- will add blockId to source line '${thisLine}' index ${thisIndex}`)
+        thisNote.addBlockID(thisPara)
+        thisNote.updateParagraph(thisPara)
+        const thisBlockID = thisPara.blockId ?? '<error>'
+        // logDebug('makeAnySyncs', `- added blockId '${thisBlockID}' to source line`)
+        // Now append to result
+        const updatedLine = `${thisLine} ${thisBlockID}`
+        output.resultNoteAndLineArr[thisIndex].line = updatedLine
+        logDebug('makeAnySyncs', `- appended blockId to result ${thisIndex} -> '${updatedLine}'`)
+      }
+    } else {
+      logDebug('makeAnySyncs', `No Synced lines in result set`)
+    }
+    return output
+  }
+  catch (err) {
+    logError('makeAnySyncs', err.message)
+    // $FlowFixMe[incompatible-return]
+    return null
   }
 }

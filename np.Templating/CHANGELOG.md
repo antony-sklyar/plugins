@@ -4,6 +4,39 @@
 
 See Plugin [README](https://github.com/NotePlan/plugins/blob/main/np.Templating/README.md) for details on available commands and use case.
 
+## [1.10.1] 2024-01-11 @dwertheimer
+
+- Bug fix to remove spaces after comment tags (<%#...)
+
+## [1.10.0] 2023-10-31 @dwertheimer
+
+- Command name changes require NotePlan 3.9.10
+- Change commands to be more descriptive (using @eduardme's new naming scheme)
+- Tweak np:invoke to work correctly with frontmatter
+
+## [1.9.12] 2023-10-24 @dwertheimer
+
+- Changed title to just 'Templating']
+
+## [1.9.11] 2023-10-12 @jgclark
+- add 'todayProgressFromTemplate' template command (from Habits & Summaries v0.20)
+
+## [1.9.10] (aka 2.0.0-bet1.13): 2023-09-11 @dwertheimer
+
+- add folder attribute to np:new for xcallback creation inside a specific folder]
+
+## [1.9.9] (aka 2.0.0-beta.12): 2023-08-12 @dwertheimer
+
+- Fix templatejs code so it doesn't add extra spaces
+
+## [1.9.8] (aka 2.0.0-beta.11): 2023-07-12 @dwertheimer
+
+- Fix web services intermittent bug
+
+## [1.9.7] (aka 2.0.0-beta.10) - 2023-05-01 @dwertheimer
+
+- Fix bug in promptDate / promptDateInterval
+
 ## [1.9.6] (aka 2.0.0-beta.09) - 2023-04-02 @dwertheimer
 
 - Fix bug in template importing
@@ -284,7 +317,7 @@ Also, it should be encouraged to rename "📋 Templates" to another name "📋 T
 > `*<%- web.weather() %>*` would be rendered as a todo item
 
 - added `promptDate` which should be used instead of `pickDate` so `placeholder` value can be used in same template in different location
-- added `promptInterval` which should be used instead of `pickInterval` so `placeholder` value can be used in same template in different location
+- added `promptDateInterval` which should be used instead of `pickInterval` so `placeholder` value can be used in same template in different location
 - fixed issues with `templateLocale` not be used properly in some methods in `DateModule`
 - implemented workaround issue with `date.dayNumber()` when running in locales not `en` or `en-US`
 - removed hard coded `discuss` variable in template rendering, would have collided if there was a variable in the rendering process which was `dicsuss`

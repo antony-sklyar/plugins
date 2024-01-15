@@ -3,7 +3,7 @@
 // -----------------------------------------------------------------------------
 // Shared Resources plugin for NotePlan
 // Jonathan Clark
-// last updated 23.2.2023 for v0.3.0, @jgclark
+// last updated 15.7.2023 for v0.4.4, @jgclark
 // -----------------------------------------------------------------------------
 
 const sharedPluginID = 'np.Shared'
@@ -12,7 +12,7 @@ import { getPluginJson, updateSettingData } from '@helpers/NPConfiguration'
 import { clo, JSP, logDebug, logError, logInfo, logWarn } from '@helpers/dev'
 import { showMessage } from '@helpers/userInput'
 
-export { openReactWindow } from './NPReactLocal'
+export { openReactWindow, onMessageFromHTMLView } from './NPReactLocal'
 
 /**
  * Log the list of resource files that should currently be available by this plugin (i.e. at run-time, not compile-time).
@@ -37,7 +37,7 @@ export async function logAvailableSharedResources(pluginID: string): Promise<voi
     const requiredFiles = liveSharedPluginJson['plugin.requiredFiles']
     for (const rf of requiredFiles) {
       const relativePathToRF = `../../${sharedPluginID}/${rf}`
-      logInfo(sharedPluginID, `- ${relativePathToRF} ${DataStore.fileExists(relativePathToRF) ? "is" : "isn't"} available from np.Shared`)
+      logInfo(sharedPluginID, `- ${relativePathToRF} ${DataStore.fileExists(relativePathToRF) ? 'is' : "isn't"} available from np.Shared`)
     }
   } catch (error) {
     logError(sharedPluginID, JSP(error))
@@ -80,7 +80,7 @@ export async function checkForWantedResources(pluginID: string, filesToCheck?: A
       if (NotePlan.environment.buildVersion >= 973) {
         // If we can, use newer method that doesn't have to load the data
         if (DataStore.fileExists(filename)) {
-          logDebug(`checkForWantedResources`, `- ${filename} exists`)
+          // logDebug(`checkForWantedResources`, `- ${filename} exists`)
           numFound++
         } else {
           logWarn(`checkForWantedResources`, `- ${filename} not found`)
@@ -88,7 +88,7 @@ export async function checkForWantedResources(pluginID: string, filesToCheck?: A
       } else {
         const data = DataStore.loadData(filename, false)
         if (data) {
-          logDebug(`checkForWantedResources`, `- found ${filename}, length ${String(data.length)}`)
+          // logDebug(`checkForWantedResources`, `- found ${filename}, length ${String(data.length)}`)
           numFound++
         } else {
           logWarn(`checkForWantedResources`, `- ${filename} not found`)
@@ -119,7 +119,7 @@ export async function onUpdateOrInstall(): Promise<void> {
     logDebug(sharedPluginID, `onUpdateOrInstall: UpdateSettingData code: ${updateSettings}`)
 
     // Tell user the plugin has been updated
-    if (pluginJson['plugin.lastUpdateInfo'] !== 'undefined') {
+    if (pluginJson['plugin.lastUpdateInfo'] !== undefined) {
       await showMessage(pluginJson['plugin.lastUpdateInfo'], 'OK, thanks', `Plugin ${pluginJson['plugin.name']}\nupdated to v${pluginJson['plugin.version']}`)
     }
   } catch (error) {

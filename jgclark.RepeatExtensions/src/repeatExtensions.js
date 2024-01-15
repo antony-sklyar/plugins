@@ -2,23 +2,31 @@
 //-----------------------------------------------------------------------
 // Repeat Extensions plugin for NotePlan
 // Jonathan Clark
-// last updated 14.3.2023 for v0.5.2
+// last updated 7.7.2023 for v0.6.1
 //-----------------------------------------------------------------------
 
 import pluginJson from "../plugin.json"
+import moment from 'moment'
 import {
   calcOffsetDate,
   calcOffsetDateStr,
   getISOWeekString,
   isDailyNote,
   isWeeklyNote,
-  RE_DATE, // find dates of form YYYY-MM-DD
+  isMonthlyNote,
+  isQuarterlyNote,
+  isYearlyNote,
+  RE_ANY_DUE_DATE_TYPE,
   RE_DATE_INTERVAL,
   RE_DATE_TIME,
   RE_DONE_DATE_TIME,
   RE_DONE_DATE_TIME_CAPTURES,
+  RE_ISO_DATE, // find dates of form YYYY-MM-DD
   RE_SCHEDULED_DAILY_NOTE_LINK,
   RE_SCHEDULED_WEEK_NOTE_LINK,
+  RE_SCHEDULED_MONTH_NOTE_LINK,
+  RE_SCHEDULED_QUARTERLY_NOTE_LINK,
+  RE_SCHEDULED_YEARLY_NOTE_LINK,
   RE_TIME, // find '12:23' with optional '[ ][AM|PM|am|pm]'
   unhyphenateString,
 } from '@helpers/dateTime'
@@ -64,29 +72,27 @@ export async function onEditorWillSave(): Promise<void> {
       // Get changed ranges
       const ranges = NotePlan.stringDiff(previousContent, latestContent)
       if (!ranges || ranges.length === 0) {
-        logDebug(`No ranges returned, so stopping.`)
+        logDebug('repeatExtensions/onEditorWillSave', `No ranges returned, so stopping.`)
         return
       }
       const earliestStart = ranges[0].start
       let latestEnd = ranges[ranges.length - 1].end
       const overallRange: TRange = Range.create(earliestStart, latestEnd)
-      logDebug('repeatExtensions/onEditorWillSave', `- overall changed content from ${rangeToString(overallRange)}`)
-      // Get changed lineIndexes
+      // logDebug('repeatExtensions/onEditorWillSave', `- overall changed content from ${rangeToString(overallRange)}`)
 
+      // Get changed lineIndexes
       // earlier method for changedExtent based on character region, which didn't seem to always include all the changed parts.
       // const changedExtent = latestContent?.slice(earliestStart, latestEnd)
       // Editor.highlightByIndex(earliestStart, latestEnd - earliestStart)
       // logDebug('repeatExtensions/onEditorWillSave', `Changed content extent: <${changedExtent}>`)
-
       // Newer method uses changed paragraphs: this will include more than necessary, but that's more useful in this case
       let changedExtent = ''
       const [startParaIndex, endParaIndex] = selectedLinesIndex(overallRange, Editor.paragraphs)
       logDebug('repeatExtensions/onEditorWillSave', `- changed lines ${startParaIndex}-${endParaIndex}`)
-      // Editor.highlightByIndex(earliestStart, latestEnd - earliestStart)
       for (let i = startParaIndex; i <= endParaIndex; i++) {
         changedExtent += Editor.paragraphs[i].content
       }
-      logDebug('repeatExtensions/onEditorWillSave', `Changed content extent: <${changedExtent}>`)
+      // logDebug('repeatExtensions/onEditorWillSave', `Changed content extent: <${changedExtent}>`)
 
       // If the changed text includes @done(...) then we may have something to update, so run repeats()
       if (changedExtent.match(RE_DONE_DATE_TIME) && changedExtent.match(RE_EXTENDED_REPEAT)) {
@@ -109,30 +115,19 @@ export async function onEditorWillSave(): Promise<void> {
  * Valid intervals are [0-9][bdwmqy].
  * To work it relies on finding @done(YYYY-MM-DD HH:MM) tags that haven't yet been shortened to @done(YYYY-MM-DD).
  * It includes cancelled tasks as well; to remove a repeat entirely, remove the @repeat tag from the task in NotePlan.
- * Note: The new repeat date is by default scheduled to a day (>YYYY-MM-DD).
- * But if the scheduled date is a week date (YYYY-Wnn), or the repeat is in a weekly note, then the new repeat date will be a scheduled week link (>YYYY-Wnn).
+ * Note: The new repeat date is by default scheduled to a day (>YYYY-MM-DD). But if the scheduled date is a week date (YYYY-Wnn), or the repeat is in a weekly note, then the new repeat date will be a scheduled week link (>YYYY-Wnn).
  * Note: Runs on the currently open note (using Editor.* funcs)
- * Note: Could add a 'Newer' mode of operation according to #351.
+ * Note: Could add a 'Newer' mode of operation according to # 351.
  * TEST: fails to appendTodo to note with same stem?
  * @author @jgclark
- * @param {CoreNoteFields} noteIn?
+ * @param {boolean} runSilently?
  */
-export async function repeats(showMessages: boolean = true): Promise<void> {
+export async function repeats(runSilently: boolean = false): Promise<void> {
   try {
-    // Get passed note details, or fall back to Editor
-    // Note: v0.5.2 changed this to run from 'Editor.note' only
-    // let note: CoreNoteFields
-    // let showMessages: boolean
-    // if (noteIn) {
-    //   note = noteIn
-      // let showMessages = false
-    // } else {
-      if (!Editor.note) {
-        throw new Error(`repeats: Couldn't get Editor.note to process`)
-      }
-    //   note = Editor.note
-    //   showMessages = true
-    // }
+    // Get passed note details, or fall back to Editor. (Note: v0.5.2 changed this to run from 'Editor.note' only)
+    if (!Editor.note) {
+      throw new Error(`repeats: Couldn't get Editor.note to process`)
+    }
     const { paragraphs, title, type, filename, note } = Editor
     if (note === null || paragraphs === null) {
       // No note open, or no paragraphs (perhaps empty note), so don't do anything.
@@ -149,8 +144,8 @@ export async function repeats(showMessages: boolean = true): Promise<void> {
     // work out where ## Done or ## Cancelled sections start, if present
     const endOfActive = findEndOfActivePartOfNote(note)
 
-    logDebug(pluginJson, `Starting for '${filename}' for ${endOfActive} active lines, showMessages: ${String(showMessages)}`)
-    logAllEnvironmentSettings()
+    logDebug(pluginJson, `Starting for '${filename}' for ${endOfActive} active lines`)
+    // logAllEnvironmentSettings()
 
     let repeatCount = 0
     let line = ''
@@ -168,40 +163,51 @@ export async function repeats(showMessages: boolean = true): Promise<void> {
 
       // find lines with datetime to shorten, and capture date part of it
       // i.e. @done(YYYY-MM-DD HH:MM[AM|PM])
-      // logDebug('repeats', `  [${n}] ${line}`)
       if (p.content.match(RE_DONE_DATE_TIME)) {
         // get completed date and time
         reReturnArray = line.match(RE_DONE_DATE_TIME_CAPTURES) ?? []
         completedDate = reReturnArray[1]
         completedTime = reReturnArray[2]
-        logDebug('repeats', `- Found completed repeat ${completedDate} ${completedTime} in line ${n}`)
+        // logDebug('repeats', `- found completed task with date-time ${completedDate} ${completedTime} in line ${n}`)
 
         // remove time string from completed date-time
         updatedLine = line.replace(completedTime, '') // couldn't get a regex to work here
         p.content = updatedLine
         // Send the update to the Editor
         Editor.updateParagraph(p)
-        logDebug('repeats', `- updated Para ${p.lineIndex} -> <${updatedLine}>`)
+        // logDebug('repeats', `- updated para ${p.lineIndex} -> <${updatedLine}>`)
 
         // Test if this is one of my special extended repeats
+
+        // TODO: Split most into a separate function so it can be tested externally
+
         if (updatedLine.match(RE_EXTENDED_REPEAT)) {
           repeatCount++
-          let newRepeatDateStr = ''
-          let newRepeatDate: Date
-          let outputLine = ''
-
           // get repeat to apply
           reReturnArray = updatedLine.match(RE_EXTENDED_REPEAT_CAPTURE) ?? []
           let dateIntervalString: string = (reReturnArray.length > 0) ? reReturnArray[1] : ''
-          logDebug('repeats', `- Found EXTENDED @repeat syntax: '${dateIntervalString}'`)
+          logDebug('repeats', `- Found extended @repeat syntax: '${dateIntervalString}'`)
 
-          // decide style of new date: daily or weekly link
+          // FIXME: need to change more of the Calendar note processing as the following is misleading.
+
+          // decide style of new date: daily / weekly / monthly / etc.link
           let timeframe = 'day'
-          if (updatedLine.match(RE_SCHEDULED_WEEK_NOTE_LINK) || isWeeklyNote(note)) {
+          // TEST: should this be now without test "or isWeeklyNote"?
+          if (updatedLine.match(RE_SCHEDULED_WEEK_NOTE_LINK) /** || isWeeklyNote(note)*/) {
             timeframe = 'week'
+          } else if (updatedLine.match(RE_SCHEDULED_MONTH_NOTE_LINK)) {
+            timeframe = 'month'
+          } else if (updatedLine.match(RE_SCHEDULED_QUARTERLY_NOTE_LINK)) {
+            timeframe = 'quarter'
+          } else if (updatedLine.match(RE_SCHEDULED_YEARLY_NOTE_LINK) /** || isYearlyNote(note)*/) {
+            timeframe = 'year'
           }
-          // TODO: use this in >day case in weekly note
-          logDebug('repeats', `- timeframe: ${timeframe} from ${String(updatedLine.match(RE_SCHEDULED_WEEK_NOTE_LINK))} / ${String(isWeeklyNote(note))}`)
+          // TEST: use this in >day case in weekly note.
+          logDebug('repeats', `  = timeframe: ${timeframe}`)
+
+          let newRepeatDateStr = ''
+          let newRepeatDate: Date
+          let outputLine = ''
 
           if (dateIntervalString[0].startsWith('+')) {
             // New repeat date = completed date (of form YYYY-MM-DD) + interval
@@ -209,28 +215,32 @@ export async function repeats(showMessages: boolean = true): Promise<void> {
               1,
               dateIntervalString.length,
             )
+            newRepeatDate = calcOffsetDate(completedDate, dateIntervalString) ?? new moment().startOf('day').toDate()
             newRepeatDateStr = calcOffsetDateStr(completedDate, dateIntervalString)
-            newRepeatDate = calcOffsetDate(completedDate, dateIntervalString) ?? new Date()
-            logDebug('repeats', `- Adding from completed date -> ${newRepeatDateStr}, ${String(newRepeatDate)}`)
+            logDebug('repeats', `- adding from completed date -> ${newRepeatDateStr}, ${String(newRepeatDate)}`)
             // Remove any >date
-            // Note: ' >'+RE_DUE_DATE, but can't get regex to work with variables like this
-            updatedLine = updatedLine.replace(/\s+>\d{4}-[01]\d{1}-\d{2}/, '')
-            // TODO: or week version?
+            updatedLine = updatedLine.replace(RE_ANY_DUE_DATE_TYPE, '')
             logDebug('repeats', `- updatedLine: ${updatedLine}`)
 
           } else {
             // New repeat date = due date + interval
-            // look for the due date (>YYYY-MM-DD)
+            // look for the due date (>YYYY-MM-DD) or other calendar types
             let dueDate = ''
             const dueDateArray = RE_SCHEDULED_DAILY_NOTE_LINK.test(updatedLine)
               ? updatedLine.match(RE_SCHEDULED_DAILY_NOTE_LINK)
               : RE_SCHEDULED_WEEK_NOTE_LINK.test(updatedLine)
                 ? updatedLine.match(RE_SCHEDULED_WEEK_NOTE_LINK)
+                : RE_SCHEDULED_MONTH_NOTE_LINK.test(updatedLine)
+                  ? updatedLine.match(RE_SCHEDULED_MONTH_NOTE_LINK)
+                  : RE_SCHEDULED_QUARTERLY_NOTE_LINK.test(updatedLine)
+                    ? updatedLine.match(RE_SCHEDULED_QUARTERLY_NOTE_LINK)
+                    : RE_SCHEDULED_YEARLY_NOTE_LINK.test(updatedLine)
+                      ? updatedLine.match(RE_SCHEDULED_YEARLY_NOTE_LINK)
                 : []
             logDebug('repeats', `- dueDateArray: ${String(dueDateArray)}`)
             if (dueDateArray && dueDateArray[0] != null) {
               dueDate = dueDateArray[0].split('>')[1]
-              // logDebug('repeats', `  due date match => ${dueDate}`)
+              logDebug('repeats', `  due date match = ${dueDate}`)
               // need to remove the old due date
               updatedLine = updatedLine.replace(` >${dueDate}`, '')
             } else {
@@ -239,8 +249,8 @@ export async function repeats(showMessages: boolean = true): Promise<void> {
               logDebug('repeats', `- no match => use completed date ${dueDate}`)
             }
             newRepeatDateStr = calcOffsetDateStr(dueDate, dateIntervalString)
-            newRepeatDate = calcOffsetDate(dueDate, dateIntervalString) ?? new Date()
-            logDebug('repeats', `- adding from due date -> ${newRepeatDateStr}, ${String(newRepeatDate)}`)
+            // newRepeatDate = calcOffsetDate(dueDate, dateIntervalString) ?? new moment().startOf('day')
+            logDebug('repeats', `- adding from due date -> ${newRepeatDateStr}`)
           }
 
           outputLine = updatedLine.replace(/@done\(.*\)/, '').trim()
@@ -249,9 +259,9 @@ export async function repeats(showMessages: boolean = true): Promise<void> {
           if (type === 'Notes') {
             // ...either in same project note, including new scheduled date
             outputLine += ` >` + newRepeatDateStr
-            logDebug(pluginJson, `- outputLine: <${outputLine}>`)
+            logDebug('repeats', `- outputLine: <${outputLine}>`)
             await Editor.insertParagraphBeforeParagraph(outputLine, p, 'open')
-            logDebug(pluginJson, `- Inserted new para after line ${p.lineIndex}`)
+            logDebug('repeats', `- inserted new para after line ${p.lineIndex}`)
           }
           else {
             // ... or in the future Calendar note
@@ -272,30 +282,33 @@ export async function repeats(showMessages: boolean = true): Promise<void> {
             // }
             logInfo(pluginJson, `- repeat -> ${newRepeatDateStr}`)
 
-            // Grr: can't use this next one, as it doesn't support undefined notes
-            // let futureNote = await DataStore.calendarNoteByDateString(newRepeatDateStr)
-            let futureNote = await DataStore.calendarNoteByDate(newRepeatDate, timeframe)
+            // Get future note (if it exists)
+            if (newRepeatDateStr.match(RE_ISO_DATE)) {
+              newRepeatDateStr = unhyphenateString(newRepeatDateStr)
+              logDebug('repeats', `- changed newRepeatDateStr to ${newRepeatDateStr}`)
+            }
+            let futureNote = await DataStore.calendarNoteByDateString(newRepeatDateStr)
+            // let futureNote = await DataStore.calendarNoteByDate(newRepeatDate, timeframe)
             if (futureNote != null) {
               // Add todo to future note
-              logDebug(pluginJson, futureNote.filename)
               await futureNote.appendTodo(outputLine)
-              logDebug(pluginJson, `- Appended new repeat in calendar note ${displayTitle(futureNote)}`)
+              logDebug('repeats', `- appended new repeat in calendar note ${displayTitle(futureNote)}`)
             } else {
               // After a fix to future calendar note creation in r635, we shouldn't get here.
               // But just in case, we'll insert new repeat into the open note
               outputLine += ` >${newRepeatDateStr}`
               logDebug('repeats', `- outputLine: ${outputLine}`)
               await Editor.insertParagraphBeforeParagraph(outputLine, p, 'open')
-              logDebug('repeats', `- Couldn't get futureNote, so instead inserted new para after line ${p.lineIndex} in original note`)
+              logInfo('repeats', `- couldn't get futureNote, so instead inserted new para after line ${p.lineIndex} in original note`)
             }
           }
         }
       }
     }
     if (repeatCount === 0) {
-      logWarn('repeats', 'No suitable completed repeats found')
-      if (showMessages) {
-        await showMessage('No suitable completed repeats found', 'OK', 'Repeat Extensions')
+      logInfo('repeats', 'No suitable completed repeats were found')
+      if (!runSilently) {
+        await showMessage('No suitable completed repeats were found', 'OK', 'Repeat Extensions')
       }
     }
   } catch (error) {
