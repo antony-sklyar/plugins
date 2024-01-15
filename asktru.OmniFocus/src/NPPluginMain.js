@@ -27,10 +27,21 @@ export async function sendToOmniFocus(): Promise<void> {
         omniFocusContent += '\n' + prefix + '- ';
         
         let taskName = paragraph.content;
+        
+        let tags = [...taskName.matchAll(/#([a-zA-Z0-9\-]+\/)*[a-zA-Z0-9\-]+/g)];
+        console.log(tags);
+        // TODO: transform #nested/hash-tag into "Hash Tag"
+        
+        let mentions = [...taskName.matchAll(/@([a-zA-Z0-9\-]+\/)*[a-zA-Z0-9\-]+/g)];
+        console.log(mentions);
+         // TODO: transform @team/jsmith into "J.Smith"
+        
         if (paragraph.date) {
             taskName = taskName.replace(/>\d{4}\-\d{2}\-\d{2}/, '');
+            taskName = taskName.replace('>today', '');
             taskName += ' @due(' + paragraph.date.toISOString().slice(0, 10) + ')';
         }
+        
         omniFocusContent += taskName;
     });
     
